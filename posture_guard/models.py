@@ -70,12 +70,23 @@ class ViewState:
 
 
 @dataclass
+class ShoulderState:
+    roll: float | None = None
+    left_elevation: float | None = None
+    right_elevation: float | None = None
+    elevation: float | None = None
+
+    confidence: float = 0.0
+
+
+@dataclass
 class DetectionMetrics:
     side: str
     values: dict[str, float]
     confidence: dict[str, float] = field(default_factory=dict)
     points: dict[str, tuple[float, float]] = field(default_factory=dict)
     view: ViewState | None = None
+    shoulders: ShoulderState | None = None
 
 
 @dataclass

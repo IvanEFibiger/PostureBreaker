@@ -307,6 +307,10 @@ class ExtractMetricsTests(unittest.TestCase):
         self.assertIsNotNone(metrics.view)
         self.assertEqual(metrics.view.orientation, "unknown")
 
+    def test_shoulder_state_is_attached(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics.shoulders)
+
     def test_respects_preferred_side(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="left")
         self.assertIsNotNone(metrics)

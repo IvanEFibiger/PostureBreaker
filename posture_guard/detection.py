@@ -9,6 +9,7 @@ from .geometry import visibility_confidence
 from .landmarks import extract_body_landmarks
 from .models import CalibrationProfile, DetectionMetrics
 from .orientation import aggregate_view, estimate_view_state
+from .shoulders import aggregate_shoulders, estimate_shoulder_state
 
 # MediaPipe Pose landmark indices.
 NOSE = 0
@@ -126,8 +127,16 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
 
     body = extract_body_landmarks(result)
     view = estimate_view_state(body, config.min_visibility) if body else None
+    shoulders = estimate_shoulder_state(body, config.min_visibility) if body else None
 
-    return DetectionMetrics(side=side, values=values, confidence=confidence, points=points, view=view)
+    return DetectionMetrics(
+        side=side,
+        values=values,
+        confidence=confidence,
+        points=points,
+        view=view,
+        shoulders=shoulders,
+    )
 
 
 class RollingMetrics:
@@ -181,7 +190,15 @@ class RollingMetrics:
             for name in point_names
         }
         view = aggregate_view(item.view for item in filtered)
-        return DetectionMetrics(side=side, values=values, confidence=confidence, points=points, view=view)
+        shoulders = aggregate_shoulders(item.shoulders for item in filtered)
+        return DetectionMetrics(
+            side=side,
+            values=values,
+            confidence=confidence,
+            points=points,
+            view=view,
+            shoulders=shoulders,
+        )
 
 
 def classify_posture(
