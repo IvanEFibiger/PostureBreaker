@@ -5,6 +5,7 @@ from collections import deque
 from typing import Any
 
 from .config import Config
+from .forward import aggregate_forward, estimate_forward_state
 from .geometry import visibility_confidence
 from .landmarks import extract_body_landmarks
 from .models import CalibrationProfile, DetectionMetrics
@@ -128,6 +129,11 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
     body = extract_body_landmarks(result)
     view = estimate_view_state(body, config.min_visibility) if body else None
     shoulders = estimate_shoulder_state(body, config.min_visibility) if body else None
+    forward = (
+        estimate_forward_state(body, side, view.orientation if view else "unknown", config.min_visibility)
+        if body
+        else None
+    )
 
     return DetectionMetrics(
         side=side,
@@ -136,6 +142,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         points=points,
         view=view,
         shoulders=shoulders,
+        forward=forward,
     )
 
 
@@ -191,6 +198,7 @@ class RollingMetrics:
         }
         view = aggregate_view(item.view for item in filtered)
         shoulders = aggregate_shoulders(item.shoulders for item in filtered)
+        forward = aggregate_forward(item.forward for item in filtered)
         return DetectionMetrics(
             side=side,
             values=values,
@@ -198,6 +206,7 @@ class RollingMetrics:
             points=points,
             view=view,
             shoulders=shoulders,
+            forward=forward,
         )
 
 

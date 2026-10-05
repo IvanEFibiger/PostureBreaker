@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .models import DetectionMetrics, ShoulderState, ViewState
+from .models import DetectionMetrics, ForwardState, ShoulderState, ViewState
 
 STATE_OK = "ok"
 STATE_LOW = "low"
@@ -51,14 +51,19 @@ def format_debug_lines(metrics: DetectionMetrics | None, min_confidence: float =
 
     view = metrics.view
     shoulders = metrics.shoulders
+    forward = metrics.forward
     view_confidence = view.confidence if view else 0.0
     shoulder_confidence = shoulders.confidence if shoulders else 0.0
+    forward_confidence = forward.confidence if forward else 0.0
 
     def view_value(name: str) -> float | None:
         return getattr(view, name) if view else None
 
     def shoulder_value(name: str) -> float | None:
         return getattr(shoulders, name) if shoulders else None
+
+    def forward_value(name: str) -> float | None:
+        return getattr(forward, name) if forward else None
 
     orientation = view.orientation if view else "unknown"
     lines = [f"VIEW {orientation} conf {view_confidence:.0%}"]
@@ -76,6 +81,9 @@ def format_debug_lines(metrics: DetectionMetrics | None, min_confidence: float =
     lines.append(_format_line("L elev", shoulder_value("left_elevation"), shoulder_confidence, min_confidence))
     lines.append(_format_line("R elev", shoulder_value("right_elevation"), shoulder_confidence, min_confidence))
     lines.append(_format_line("elev", shoulder_value("elevation"), shoulder_confidence, min_confidence))
+    lines.append("FORWARD")
+    lines.append(_format_line("head", forward_value("head_forward_ratio"), forward_confidence, min_confidence))
+    lines.append(_format_line("torso", forward_value("torso_forward_angle"), forward_confidence, min_confidence))
     return lines
 
 
@@ -106,6 +114,16 @@ def _shoulders_payload(shoulders: ShoulderState | None) -> dict[str, Any] | None
     }
 
 
+def _forward_payload(forward: ForwardState | None) -> dict[str, Any] | None:
+    if forward is None:
+        return None
+    return {
+        "head_forward_ratio": forward.head_forward_ratio,
+        "torso_forward_angle": forward.torso_forward_angle,
+        "confidence": forward.confidence,
+    }
+
+
 def build_snapshot(
     metrics: DetectionMetrics | None,
     label: str,
@@ -119,6 +137,7 @@ def build_snapshot(
         "side": metrics.side if metrics else None,
         "view": _view_payload(metrics.view if metrics else None),
         "shoulders": _shoulders_payload(metrics.shoulders if metrics else None),
+        "forward": _forward_payload(metrics.forward if metrics else None),
         "metrics": dict(metrics.values) if metrics else {},
         "confidence": dict(metrics.confidence) if metrics else {},
     }

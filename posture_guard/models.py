@@ -80,6 +80,14 @@ class ShoulderState:
 
 
 @dataclass
+class ForwardState:
+    head_forward_ratio: float | None = None
+    torso_forward_angle: float | None = None
+
+    confidence: float = 0.0
+
+
+@dataclass
 class DetectionMetrics:
     side: str
     values: dict[str, float]
@@ -87,6 +95,7 @@ class DetectionMetrics:
     points: dict[str, tuple[float, float]] = field(default_factory=dict)
     view: ViewState | None = None
     shoulders: ShoulderState | None = None
+    forward: ForwardState | None = None
 
 
 @dataclass

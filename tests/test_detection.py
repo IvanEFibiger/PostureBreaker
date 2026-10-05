@@ -311,6 +311,10 @@ class ExtractMetricsTests(unittest.TestCase):
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
         self.assertIsNotNone(metrics.shoulders)
 
+    def test_forward_state_is_attached(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics.forward)
+
     def test_respects_preferred_side(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="left")
         self.assertIsNotNone(metrics)
