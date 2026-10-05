@@ -194,7 +194,7 @@ class Dashboard(ctk.CTk):
         self._card_breaks.grid(row=0, column=1, padx=6, pady=6, sticky="ew")
         self._card_alerts = StatCard(cards_frame, "Alertas postura")
         self._card_alerts.grid(row=1, column=0, padx=6, pady=6, sticky="ew")
-        self._card_bad = StatCard(cards_frame, "Mala postura")
+        self._card_bad = StatCard(cards_frame, "Mala postura hoy")
         self._card_bad.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
 
         self._issue_frame = ctk.CTkFrame(host, fg_color=CARD_COLOR, corner_radius=16)
@@ -298,13 +298,17 @@ class Dashboard(ctk.CTk):
         self._card_work.set_value(_format_time(float(snap["work_seconds_today"])))
         self._card_breaks.set_value(str(snap["breaks_completed"]))
         self._card_alerts.set_value(str(snap["posture_alerts"]))
-        self._card_bad.set_value(_format_time(float(snap.get("bad_streak_seconds", 0))))
+        self._card_bad.set_value(_format_time(float(snap.get("bad_posture_seconds_today", 0.0))))
 
         current_issue = str(snap.get("current_issue", ""))
         current_guidance = str(snap.get("current_guidance", ""))
+        bad_streak = float(snap.get("bad_streak_seconds", 0.0))
         if current_issue:
             self._issue_title.configure(text=current_issue)
-            self._issue_body.configure(text=current_guidance or "Sin sugerencia puntual.")
+            body = current_guidance or "Sin sugerencia puntual."
+            if bad_streak > 0:
+                body = f"{body}\nRacha actual: {_format_short(bad_streak)}"
+            self._issue_body.configure(text=body)
         else:
             self._issue_title.configure(text="Postura estable")
             self._issue_body.configure(text="Sin correccion puntual ahora mismo.")

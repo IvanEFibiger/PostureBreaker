@@ -363,6 +363,7 @@ def _camera_worker(
                     has_pose=has_pose,
                     work_seconds_today=today["total_work_seconds"],
                     bad_streak_seconds=alert_state.bad_posture_streak,
+                    bad_posture_seconds_today=today["bad_posture_seconds"],
                     posture_alerts=today["posture_alerts"],
                     suppressed_posture_alerts=today["suppressed_posture_alerts"],
                     break_alerts=today["break_alerts"],

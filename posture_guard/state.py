@@ -22,6 +22,7 @@ class SharedState:
     status: str = "starting"
     work_seconds_today: float = 0.0
     bad_streak_seconds: float = 0.0
+    bad_posture_seconds_today: float = 0.0
     posture_alerts: int = 0
     suppressed_posture_alerts: int = 0
     break_alerts: int = 0
