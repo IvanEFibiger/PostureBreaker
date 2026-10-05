@@ -44,6 +44,23 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.store = AnalyticsStore(self.db_path)
         self.assertEqual(self.store.score, 60.0)
 
+    def test_hourly_trend_reflects_real_time(self) -> None:
+        self.store.add_posture_time(60.0, is_bad=False)
+        self.store.add_posture_time(40.0, is_bad=True)
+        trend = self.store.hourly_trend()
+        self.assertEqual(trend[-1]["value"], 60.0)
+
+    def test_hourly_trend_zero_without_data(self) -> None:
+        self.assertEqual(self.store.hourly_trend()[-1]["value"], 0.0)
+
+    def test_hourly_trend_persists_across_reopen(self) -> None:
+        self.store.add_posture_time(90.0, is_bad=False)
+        self.store.add_posture_time(10.0, is_bad=True)
+        self.store.flush()
+        self.store.close()
+        self.store = AnalyticsStore(self.db_path)
+        self.assertEqual(self.store.hourly_trend()[-1]["value"], 90.0)
+
     def test_roll_day_resets_daily_totals(self) -> None:
         yesterday = dt.date.today() - dt.timedelta(days=1)
         self.store._today = yesterday

@@ -23,6 +23,7 @@ class AnalyticsStore:
 
         self._daily = self._load_daily(self._today)
         self._ensure_daily_row(self._today)
+        self._hourly = self._load_hourly(self._today)
 
     def _ensure_schema(self) -> None:
         self.conn.executescript(
@@ -92,9 +93,19 @@ class AnalyticsStore:
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS hourly_stats (
+                day TEXT NOT NULL,
+                hour INTEGER NOT NULL,
+                good_posture_seconds REAL NOT NULL DEFAULT 0,
+                bad_posture_seconds REAL NOT NULL DEFAULT 0,
+                work_seconds REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(day, hour)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_posture_samples_ts ON posture_samples(ts);
             CREATE INDEX IF NOT EXISTS idx_posture_events_ts ON posture_events(ts);
             CREATE INDEX IF NOT EXISTS idx_break_events_ts ON break_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_hourly_stats_day ON hourly_stats(day);
             """
         )
         self.conn.commit()
@@ -126,6 +137,33 @@ class AnalyticsStore:
         if row is None:
             return self._empty_daily(day)
         return dict(row)
+
+    def _empty_hourly(self) -> dict[int, dict[str, float]]:
+        return {
+            hour: {"good_posture_seconds": 0.0, "bad_posture_seconds": 0.0, "work_seconds": 0.0}
+            for hour in range(24)
+        }
+
+    def _load_hourly(self, day: dt.date) -> dict[int, dict[str, float]]:
+        hourly = self._empty_hourly()
+        rows = self.conn.execute(
+            """
+            SELECT hour, good_posture_seconds, bad_posture_seconds, work_seconds
+            FROM hourly_stats
+            WHERE day = ?
+            """,
+            (day.isoformat(),),
+        ).fetchall()
+        for row in rows:
+            hourly[int(row["hour"])] = {
+                "good_posture_seconds": float(row["good_posture_seconds"]),
+                "bad_posture_seconds": float(row["bad_posture_seconds"]),
+                "work_seconds": float(row["work_seconds"]),
+            }
+        return hourly
+
+    def _current_hour(self) -> int:
+        return dt.datetime.now().hour
 
     def _score_from_payload(self, payload: dict[str, Any]) -> float:
         good = float(payload.get("good_posture_seconds", 0.0))
@@ -187,6 +225,7 @@ class AnalyticsStore:
         self._today = today
         self._daily = self._load_daily(today)
         self._ensure_daily_row(today)
+        self._hourly = self._load_hourly(today)
 
     def start_session(self, camera_index: int) -> None:
         now = dt.datetime.now().isoformat(timespec="seconds")
@@ -228,11 +267,13 @@ class AnalyticsStore:
         self._daily["total_work_seconds"] += seconds
         if focus_mode:
             self._daily["focus_seconds"] += seconds
+        self._hourly[self._current_hour()]["work_seconds"] += seconds
 
     def add_posture_time(self, seconds: float, is_bad: bool) -> None:
         self._roll_day()
         key = "bad_posture_seconds" if is_bad else "good_posture_seconds"
         self._daily[key] += seconds
+        self._hourly[self._current_hour()][key] += seconds
 
     def record_sample(
         self,
@@ -364,16 +405,13 @@ class AnalyticsStore:
 
     def hourly_trend(self, hours: int = 8) -> list[dict[str, Any]]:
         now = dt.datetime.now()
-        rows = self.conn.execute(
-            """
-            SELECT strftime('%H', ts) AS hour_key, AVG(score) AS avg_score
-            FROM posture_samples
-            WHERE date(ts) = ?
-            GROUP BY hour_key
-            """,
-            (self._today.isoformat(),),
-        ).fetchall()
-        by_hour = {int(row["hour_key"]): round(float(row["avg_score"]), 1) for row in rows}
+        by_hour: dict[int, float] = {}
+        for hour, payload in self._hourly.items():
+            good = payload["good_posture_seconds"]
+            bad = payload["bad_posture_seconds"]
+            total = good + bad
+            if total >= 1.0:
+                by_hour[hour] = round(good / total * 100.0, 1)
         start_hour = max(0, now.hour - hours + 1)
         return [
             {"label": f"{hour:02d}", "value": by_hour.get(hour, 0.0)}
@@ -456,6 +494,26 @@ class AnalyticsStore:
                 self._daily["focus_seconds"],
             ),
         )
+        for hour, payload in self._hourly.items():
+            if not (payload["good_posture_seconds"] or payload["bad_posture_seconds"] or payload["work_seconds"]):
+                continue
+            self.conn.execute(
+                """
+                INSERT INTO hourly_stats(day, hour, good_posture_seconds, bad_posture_seconds, work_seconds)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(day, hour) DO UPDATE SET
+                    good_posture_seconds = excluded.good_posture_seconds,
+                    bad_posture_seconds = excluded.bad_posture_seconds,
+                    work_seconds = excluded.work_seconds
+                """,
+                (
+                    self._today.isoformat(),
+                    hour,
+                    payload["good_posture_seconds"],
+                    payload["bad_posture_seconds"],
+                    payload["work_seconds"],
+                ),
+            )
         self.conn.commit()
 
     def close(self) -> None:
