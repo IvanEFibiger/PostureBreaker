@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+SCHEMA_VERSION = 1
+
 
 class AnalyticsStore:
     def __init__(self, db_path: Path, legacy_history_dir: Path | None = None) -> None:
@@ -17,7 +19,7 @@ class AnalyticsStore:
         self._focus_period_id: int | None = None
         self._today = dt.date.today()
 
-        self._ensure_schema()
+        self._migrate()
         if legacy_history_dir is not None:
             self._import_legacy_history(legacy_history_dir)
 
@@ -25,7 +27,22 @@ class AnalyticsStore:
         self._ensure_daily_row(self._today)
         self._hourly = self._load_hourly(self._today)
 
-    def _ensure_schema(self) -> None:
+    def _schema_version(self) -> int:
+        row = self.conn.execute("PRAGMA user_version").fetchone()
+        return int(row[0]) if row else 0
+
+    def _migrate(self) -> None:
+        try:
+            version = self._schema_version()
+            if version < 1:
+                self._apply_base_schema()
+                self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self.conn.commit()
+        except sqlite3.DatabaseError:
+            self.conn.close()
+            raise
+
+    def _apply_base_schema(self) -> None:
         self.conn.executescript(
             """
             PRAGMA journal_mode=WAL;
@@ -520,3 +537,14 @@ class AnalyticsStore:
         self.end_session()
         self.flush()
         self.conn.close()
+
+
+def open_store(db_path: Path, legacy_history_dir: Path | None = None) -> AnalyticsStore:
+    """Open the analytics database, quarantining and recreating a corrupt file."""
+    try:
+        return AnalyticsStore(db_path, legacy_history_dir=legacy_history_dir)
+    except sqlite3.DatabaseError:
+        corrupt_path = db_path.with_name(db_path.name + ".corrupt")
+        if db_path.exists():
+            db_path.replace(corrupt_path)
+        return AnalyticsStore(db_path, legacy_history_dir=legacy_history_dir)

@@ -17,7 +17,7 @@ from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
 from .notifications import Notifications
 from .state import SharedState
-from .storage import AnalyticsStore
+from .storage import AnalyticsStore, open_store
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def _camera_worker(
 
     db_path = _resolve_path(data_dir, config.database_path)
     legacy_history_dir = _resolve_path(data_dir, config.history_dir)
-    store = AnalyticsStore(db_path, legacy_history_dir=legacy_history_dir)
+    store = open_store(db_path, legacy_history_dir=legacy_history_dir)
     store.start_session(config.camera_index)
 
     show_camera = False

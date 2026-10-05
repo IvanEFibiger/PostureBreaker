@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from posture_guard.storage import AnalyticsStore
+from posture_guard.storage import SCHEMA_VERSION, AnalyticsStore, open_store
 
 
 class AnalyticsStoreTests(unittest.TestCase):
@@ -102,6 +102,45 @@ class AnalyticsStoreTests(unittest.TestCase):
             (day.isoformat(), good, bad),
         )
         self.store.conn.commit()
+
+
+class MigrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self._tmp.name) / "history" / "test.db"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_schema_version_is_stamped(self) -> None:
+        store = AnalyticsStore(self.db_path)
+        version = store.conn.execute("PRAGMA user_version").fetchone()[0]
+        store.close()
+        self.assertEqual(int(version), SCHEMA_VERSION)
+
+    def test_migration_is_idempotent_across_reopens(self) -> None:
+        store = AnalyticsStore(self.db_path)
+        store.add_posture_time(10.0, is_bad=False)
+        store.close()
+        reopened = AnalyticsStore(self.db_path)
+        version = reopened.conn.execute("PRAGMA user_version").fetchone()[0]
+        reopened.close()
+        self.assertEqual(int(version), SCHEMA_VERSION)
+
+    def test_open_store_creates_usable_store(self) -> None:
+        store = open_store(self.db_path)
+        store.add_posture_time(5.0, is_bad=True)
+        self.assertEqual(store.score, 0.0)
+        store.close()
+
+    def test_open_store_quarantines_and_recovers_corrupt_db(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path.write_bytes(b"this is not a sqlite database")
+        store = open_store(self.db_path)
+        store.add_posture_time(5.0, is_bad=False)
+        self.assertEqual(store.score, 100.0)
+        store.close()
+        self.assertTrue(self.db_path.with_name(self.db_path.name + ".corrupt").exists())
 
 
 if __name__ == "__main__":
