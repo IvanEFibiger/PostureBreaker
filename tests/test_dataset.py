@@ -6,7 +6,9 @@ import unittest
 from pathlib import Path
 
 from posture_guard.dataset import (
+    compare_to_baseline,
     flatten_snapshot,
+    format_comparison,
     format_summary,
     load_snapshots,
     separability,
@@ -60,6 +62,12 @@ class FlattenSnapshotTests(unittest.TestCase):
     def test_none_side_structures_are_ignored(self) -> None:
         self.assertEqual(flatten_snapshot(snapshot("x")), {})
 
+    def test_reads_observations_payload(self) -> None:
+        payload = snapshot("x", observations={"head_yaw": {"value": 0.3, "confidence": 0.8}})
+        signals = flatten_snapshot(payload)
+        self.assertAlmostEqual(signals["head_yaw"][0], 0.3)
+        self.assertAlmostEqual(signals["head_yaw"][1], 0.8)
+
 
 class SummarizeSnapshotsTests(unittest.TestCase):
     def test_computes_stats_per_label(self) -> None:
@@ -101,6 +109,50 @@ class SummarizeSnapshotsTests(unittest.TestCase):
     def test_format_summary_mentions_labels(self) -> None:
         summary = summarize_snapshots([snapshot("good", metrics={"m": 1.0})])
         self.assertIn("good", format_summary(summary))
+
+    def test_median_and_mad_are_robust(self) -> None:
+        rows = [snapshot("good", metrics={"m": float(value)}) for value in (1.0, 2.0, 3.0, 4.0, 5.0)]
+        stats = summarize_snapshots(rows)["good"]["m"]
+        self.assertAlmostEqual(stats.median, 3.0)
+        self.assertAlmostEqual(stats.mad, 1.0)
+
+
+class BaselineComparisonTests(unittest.TestCase):
+    def test_compares_scenarios_against_baseline(self) -> None:
+        rows = [
+            snapshot("monitor_1_good", metrics={"neck_yaw_delta": 4.0}),
+            snapshot("neck_rotated", metrics={"neck_yaw_delta": 30.0}),
+        ]
+        summary = summarize_snapshots(rows)
+        comparison = compare_to_baseline(summary, "monitor_1_good")
+        self.assertIn("neck_rotated", comparison)
+        row = comparison["neck_rotated"]["neck_yaw_delta"]
+        self.assertAlmostEqual(row["delta"], 26.0)
+        self.assertGreater(row["effect"], 0.0)
+
+    def test_missing_baseline_label_is_empty(self) -> None:
+        summary = summarize_snapshots([snapshot("a", metrics={"m": 1.0})])
+        self.assertEqual(compare_to_baseline(summary, "nope"), {})
+
+    def test_format_comparison_mentions_labels(self) -> None:
+        summary = summarize_snapshots(
+            [
+                snapshot("base", metrics={"m": 1.0}),
+                snapshot("scenario", metrics={"m": 2.0}),
+            ]
+        )
+        comparison = compare_to_baseline(summary, "base")
+        self.assertIn("scenario", format_comparison(comparison))
+
+    def test_baseline_label_is_excluded(self) -> None:
+        summary = summarize_snapshots(
+            [
+                snapshot("base", metrics={"m": 1.0}),
+                snapshot("scenario", metrics={"m": 2.0}),
+            ]
+        )
+        comparison = compare_to_baseline(summary, "base")
+        self.assertNotIn("base", comparison)
 
 
 class SnapshotRoundTripTests(unittest.TestCase):

@@ -31,6 +31,8 @@ class MetricStats:
     count: int
     mean: float
     std: float
+    median: float
+    mad: float
     minimum: float
     maximum: float
     coverage: float
@@ -85,6 +87,11 @@ def flatten_snapshot(snapshot: dict[str, Any]) -> dict[str, tuple[float, float]]
             if value is not None:
                 signals[name] = (float(value), forward_confidence)
 
+    observations = snapshot.get("observations") or {}
+    for name, payload in observations.items():
+        if isinstance(payload, dict) and payload.get("value") is not None:
+            signals[name] = (float(payload["value"]), float(payload.get("confidence", 1.0)))
+
     return signals
 
 
@@ -102,10 +109,13 @@ def summarize_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, dict[str, 
             pairs = [row[name] for row in rows if name in row]
             values = [value for value, _ in pairs]
             confidences = [confidence for _, confidence in pairs]
+            median = statistics.median(values)
             stats[name] = MetricStats(
                 count=len(values),
                 mean=statistics.fmean(values),
                 std=statistics.pstdev(values) if len(values) > 1 else 0.0,
+                median=median,
+                mad=statistics.median([abs(value - median) for value in values]),
                 minimum=min(values),
                 maximum=max(values),
                 coverage=len(values) / len(rows),
@@ -132,9 +142,52 @@ def format_summary(summary: dict[str, dict[str, MetricStats]]) -> str:
         lines.append(f"[{label}]")
         for name, stats in sorted(summary[label].items()):
             lines.append(
-                f"  {name:<24} mean {stats.mean:+.3f}  std {stats.std:.3f}  "
+                f"  {name:<24} median {stats.median:+.3f}  mad {stats.mad:.3f}  "
+                f"mean {stats.mean:+.3f}  std {stats.std:.3f}  "
                 f"min {stats.minimum:+.3f}  max {stats.maximum:+.3f}  "
                 f"cov {stats.coverage:.0%}  conf {stats.confidence:.0%}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def compare_to_baseline(
+    summary: dict[str, dict[str, MetricStats]],
+    baseline_label: str,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """For each scenario label, how far each metric moved from the baseline view."""
+    baseline = summary.get(baseline_label)
+    if not baseline:
+        return {}
+
+    comparison: dict[str, dict[str, dict[str, float]]] = {}
+    for label, stats in summary.items():
+        if label == baseline_label:
+            continue
+        rows: dict[str, dict[str, float]] = {}
+        for name, metric in stats.items():
+            base = baseline.get(name)
+            if base is None:
+                continue
+            delta = metric.median - base.median
+            rows[name] = {
+                "delta": delta,
+                "effect": delta / max(base.mad, _SEPARABILITY_FLOOR),
+                "coverage": metric.coverage,
+                "confidence": metric.confidence,
+            }
+        comparison[label] = rows
+    return comparison
+
+
+def format_comparison(comparison: dict[str, dict[str, dict[str, float]]]) -> str:
+    lines: list[str] = []
+    for label in sorted(comparison):
+        lines.append(f"[{label} vs baseline]")
+        for name, row in sorted(comparison[label].items()):
+            lines.append(
+                f"  {name:<24} delta {row['delta']:+.3f}  effect {row['effect']:+.2f}  "
+                f"cov {row['coverage']:.0%}  conf {row['confidence']:.0%}"
             )
         lines.append("")
     return "\n".join(lines).rstrip()

@@ -15,7 +15,7 @@ from posture_guard.debug import (
     format_debug_lines,
     metric_state,
 )
-from posture_guard.models import DetectionMetrics, ForwardState, ShoulderState, ViewState
+from posture_guard.models import DetectionMetrics, ForwardState, MetricObservation, ShoulderState, ViewState
 
 
 def make_metrics() -> DetectionMetrics:
@@ -35,6 +35,7 @@ def make_metrics() -> DetectionMetrics:
         ),
         shoulders=ShoulderState(roll=1.8, left_elevation=0.32, right_elevation=0.30, elevation=0.32, confidence=0.88),
         forward=ForwardState(head_forward_ratio=0.21, torso_forward_angle=6.5, confidence=0.85),
+        observations={"head_yaw": MetricObservation(0.31, 0.92)},
     )
 
 
@@ -82,6 +83,7 @@ class BuildSnapshotTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot["view"]["torso_yaw"], 0.07)
         self.assertAlmostEqual(snapshot["shoulders"]["elevation"], 0.32)
         self.assertAlmostEqual(snapshot["forward"]["torso_forward_angle"], 6.5)
+        self.assertAlmostEqual(snapshot["observations"]["head_yaw"]["value"], 0.31)
         self.assertAlmostEqual(snapshot["metrics"]["ear_shoulder_dx"], 0.05)
 
     def test_none_metrics_is_safe(self) -> None:

@@ -124,6 +124,15 @@ def _forward_payload(forward: ForwardState | None) -> dict[str, Any] | None:
     }
 
 
+def _observations_payload(metrics: DetectionMetrics | None) -> dict[str, Any]:
+    if metrics is None:
+        return {}
+    return {
+        name: {"value": observation.value, "confidence": observation.confidence}
+        for name, observation in metrics.observations.items()
+    }
+
+
 def build_snapshot(
     metrics: DetectionMetrics | None,
     label: str,
@@ -138,6 +147,7 @@ def build_snapshot(
         "view": _view_payload(metrics.view if metrics else None),
         "shoulders": _shoulders_payload(metrics.shoulders if metrics else None),
         "forward": _forward_payload(metrics.forward if metrics else None),
+        "observations": _observations_payload(metrics),
         "metrics": dict(metrics.values) if metrics else {},
         "confidence": dict(metrics.confidence) if metrics else {},
     }
