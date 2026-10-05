@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 
+from posture_guard.config import Config
 from posture_guard.issues import PostureIssue
-from posture_guard.models import CalibrationProfile, MetricThreshold
-from posture_guard.risk import evaluate_issues, metric_severity
+from posture_guard.models import CalibrationProfile, MetricBaseline, MetricObservation, MetricThreshold
+from posture_guard.risk import evaluate_issues, evaluate_v2_issues, metric_severity
 
 
 def make_profile() -> CalibrationProfile:
@@ -79,6 +80,43 @@ class EvaluateIssuesTests(unittest.TestCase):
         )
         self.assertEqual(evaluation.dominant_issue, PostureIssue.SHOULDER_ASYMMETRY)
         self.assertGreater(evaluation.risk_score, 0.0)
+
+
+def baseline(center: float = 0.0, spread: float = 0.0) -> MetricBaseline:
+    return MetricBaseline(center=center, spread=spread, coverage=1.0, confidence=1.0, sample_count=10)
+
+
+class EvaluateV2IssuesTests(unittest.TestCase):
+    def test_normalizes_deviation_against_baseline(self) -> None:
+        observations = {"head_forward_ratio": MetricObservation(0.20, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"head_forward_ratio": baseline()}, {}, Config())
+        # deviation 0.20, margin 0.08, scale 0.08 -> severity 1.5; weight 1.5 -> risk 2.25
+        self.assertAlmostEqual(evaluation.risk_score, 2.25)
+        self.assertEqual(evaluation.dominant_issue, PostureIssue.HEAD_FORWARD)
+
+    def test_within_baseline_is_not_an_issue(self) -> None:
+        observations = {"head_forward_ratio": MetricObservation(0.02, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"head_forward_ratio": baseline()}, {}, Config())
+        self.assertEqual(evaluation.risk_score, 0.0)
+
+    def test_missing_baseline_is_skipped(self) -> None:
+        observations = {"head_forward_ratio": MetricObservation(0.20, 1.0)}
+        self.assertEqual(evaluate_v2_issues(observations, {}, {}, Config()).risk_score, 0.0)
+
+    def test_view_context_metric_has_no_issue(self) -> None:
+        observations = {"head_yaw": MetricObservation(0.90, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"head_yaw": baseline()}, {}, Config())
+        self.assertEqual(evaluation.risk_score, 0.0)
+
+    def test_global_scope_uses_global_baselines(self) -> None:
+        observations = {"neck_roll_delta": MetricObservation(20.0, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {}, {"neck_roll_delta": baseline()}, Config())
+        self.assertGreater(evaluation.risk_score, 0.0)
+
+    def test_noise_floor_suppresses_tiny_deviations(self) -> None:
+        observations = {"head_forward_ratio": MetricObservation(0.10, 1.0)}
+        noisy = {"head_forward_ratio": baseline(spread=0.05)}
+        self.assertEqual(evaluate_v2_issues(observations, noisy, {}, Config()).risk_score, 0.0)
 
 
 if __name__ == "__main__":

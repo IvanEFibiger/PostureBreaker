@@ -7,8 +7,8 @@ from .alerts import BreakManager
 from .config import Config
 from .detection import classify_posture, dominant_issue
 from .issues import issue_details, policy_for
-from .models import AlertState, CalibrationProfile, DetectionMetrics
-from .risk import IssueEvaluation, evaluate_issues
+from .models import AlertState, CalibrationProfile, DetectionMetrics, MetricBaseline
+from .risk import IssueEvaluation, evaluate_issues, evaluate_v2_issues
 from .timing import is_session_gap
 
 
@@ -77,9 +77,19 @@ class PostureEngine:
         self.issue_streaks: dict[str, float] = {}
         self.issue_loads: dict[str, float] = {}
         self._issue_alert_at: dict[str, float] = {}
+        self.view_baselines: dict[str, MetricBaseline] = {}
+        self.global_baselines: dict[str, MetricBaseline] = {}
 
     def set_profile(self, profile: CalibrationProfile | None) -> None:
         self.profile = profile
+
+    def set_baselines(
+        self,
+        view_baselines: dict[str, MetricBaseline],
+        global_baselines: dict[str, MetricBaseline],
+    ) -> None:
+        self.view_baselines = dict(view_baselines)
+        self.global_baselines = dict(global_baselines)
 
     def clear_profile(self) -> None:
         self.profile = None
@@ -143,11 +153,19 @@ class PostureEngine:
         )
         issue_type, issue_label, issue_guidance, issue_severity = dominant_issue(bad_by_metric, severity)
 
-        evaluation = (
-            evaluate_issues(metrics.values, metrics.confidence, self.profile, self.config.metric_min_confidence)
-            if self.profile and metrics
-            else IssueEvaluation()
-        )
+        if metrics and (self.view_baselines or self.global_baselines):
+            evaluation = evaluate_v2_issues(
+                metrics.observations,
+                self.view_baselines,
+                self.global_baselines,
+                self.config,
+            )
+        elif self.profile and metrics:
+            evaluation = evaluate_issues(
+                metrics.values, metrics.confidence, self.profile, self.config.metric_min_confidence
+            )
+        else:
+            evaluation = IssueEvaluation()
         v2_label, v2_guidance = issue_details(evaluation.dominant_issue)
 
         observed: set[str] = set()

@@ -287,6 +287,10 @@ def _camera_worker(
         profile = active_view.calibration if active_view else None
         notifications = Notifications()
         engine = PostureEngine(config, profile)
+        engine.set_baselines(
+            active_view.metric_baselines if active_view else {},
+            calibration_set.global_baselines if calibration_set else {},
+        )
         calibrator = Calibrator(config.calibration_frames)
         smoother = RollingMetrics(config.smoothing_window, config.smoothing_min_observations)
         selector = ViewSelector(config.view_switch_stability_seconds, initial_id=active_view_id)
@@ -419,6 +423,7 @@ def _camera_worker(
                         active_view_id = active_view.id
                         profile = active_view.calibration
                         engine.set_profile(profile)
+                        engine.set_baselines(active_view.metric_baselines, calibration_set.global_baselines)
                         engine.reset_posture_state()
                         store.log_break_event(
                             "view_changed",
@@ -444,6 +449,7 @@ def _camera_worker(
                     active_view_id = None
                     profile = None
                     engine.clear_profile()
+                    engine.set_baselines({}, {})
                     selector.active_id = None
                     calibrator.cancel()
                     if calibration_path.exists():
@@ -571,6 +577,7 @@ def _camera_worker(
                                 new_view_pending = False
                                 active_view_id = active_view.id
                                 selector.active_id = active_view_id
+                                engine.set_baselines(active_view.metric_baselines, calibration_set.global_baselines)
                                 save_calibration_set(calibration_path, calibration_set)
                                 engine.set_profile(profile)
                                 logger.info("calibration_saved quality=%.1f", profile.quality_score)

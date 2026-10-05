@@ -4,7 +4,13 @@ import unittest
 
 from posture_guard.config import Config
 from posture_guard.engine import Event, PostureEngine
-from posture_guard.models import CalibrationProfile, DetectionMetrics, MetricThreshold
+from posture_guard.models import (
+    CalibrationProfile,
+    DetectionMetrics,
+    MetricBaseline,
+    MetricObservation,
+    MetricThreshold,
+)
 
 
 def make_config(**overrides: float) -> Config:
@@ -204,6 +210,21 @@ class SnoozeTests(unittest.TestCase):
         engine.update(bad_metrics(), True, 1.0, 1000.0)
         result = engine.update(good_metrics(), True, 1.0, 1001.0)
         self.assertIn(Event.ISSUE_RECOVERED, result.events)
+
+    def test_v2_risk_uses_calibrated_baselines(self) -> None:
+        engine = PostureEngine(make_config(), None)
+        engine.set_baselines(
+            {"head_forward_ratio": MetricBaseline(0.0, 0.0, 1.0, 1.0, 10)},
+            {},
+        )
+        metrics = DetectionMetrics(
+            side="right",
+            values={},
+            observations={"head_forward_ratio": MetricObservation(0.2, 1.0)},
+        )
+        result = engine.update(metrics, True, 0.5, 1.0)
+        self.assertGreater(result.risk_score, 0.0)
+        self.assertEqual(result.dominant_issue, "head_forward")
 
 
 if __name__ == "__main__":
