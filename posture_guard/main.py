@@ -277,7 +277,7 @@ def _camera_worker(
         notifications = Notifications()
         engine = PostureEngine(config, profile)
         calibrator = Calibrator(config.calibration_frames)
-        smoother = RollingMetrics(config.smoothing_window)
+        smoother = RollingMetrics(config.smoothing_window, config.smoothing_min_observations)
 
         db_path = _resolve_path(data_dir, config.database_path)
         legacy_history_dir = _resolve_path(data_dir, config.history_dir)

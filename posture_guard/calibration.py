@@ -126,13 +126,14 @@ class Calibrator:
             side_samples = [values for side, values in self.samples if side == dominant_side]
         metric_names = sorted(set().union(*(sample.keys() for sample in side_samples)))
 
-        mean_values = {
-            name: statistics.fmean(sample[name] for sample in side_samples if name in sample)
-            for name in metric_names
-        }
+        mean_values: dict[str, float] = {}
         std_values: dict[str, float] = {}
         for name in metric_names:
             present = [sample[name] for sample in side_samples if name in sample]
+            coverage = len(present) / len(side_samples)
+            if coverage < config.calibration_min_metric_coverage:
+                continue
+            mean_values[name] = statistics.fmean(present)
             std_values[name] = statistics.pstdev(present) if len(present) > 1 else 0.0
 
         if self.mode == "good":

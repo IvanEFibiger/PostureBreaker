@@ -326,6 +326,24 @@ class RollingMetricsTests(unittest.TestCase):
         self.assertIsNotNone(mean)
         self.assertAlmostEqual(mean.confidence["a"], 0.6)
 
+    def test_mean_is_weighted_by_confidence(self) -> None:
+        smoother = RollingMetrics(window_size=4)
+        smoother.append(DetectionMetrics(side="right", values={"a": 1.0}, confidence={"a": 1.0}, points={}))
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.0}, confidence={"a": 0.0}, points={}))
+        mean = smoother.mean()
+        self.assertIsNotNone(mean)
+        self.assertAlmostEqual(mean.values["a"], 1.0)
+
+    def test_metric_below_min_observations_is_not_published(self) -> None:
+        smoother = RollingMetrics(window_size=4, min_observations=2)
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.1, "b": 0.5}, points={}))
+        self.assertNotIn("a", smoother.mean().values)
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.3}, points={}))
+        mean = smoother.mean()
+        self.assertIn("a", mean.values)
+        self.assertAlmostEqual(mean.values["a"], 0.2)
+        self.assertNotIn("b", mean.values)
+
 
 if __name__ == "__main__":
     unittest.main()

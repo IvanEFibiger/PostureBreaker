@@ -156,13 +156,34 @@ class BuildProfileTests(unittest.TestCase):
         self.assertGreater(profile.quality_score, 0.0)
 
     def test_partial_samples_are_averaged_over_present_frames(self) -> None:
-        calibrator = Calibrator(2)
+        calibrator = Calibrator(4)
         calibrator.start("good")
-        calibrator.add(_metrics({"a": 0.10}))
-        calibrator.add(_metrics({"a": 0.30, "b": 0.50}))
-        profile = calibrator.build_profile(None, Config(calibration_frames=2))
-        self.assertAlmostEqual(profile.good_mean["a"], 0.20)
-        self.assertEqual(profile.good_mean["b"], 0.50)
+        calibrator.add(_metrics({"a": 0.10, "b": 0.20}))
+        calibrator.add(_metrics({"a": 0.30}))
+        calibrator.add(_metrics({"a": 0.30, "b": 0.40}))
+        calibrator.add(_metrics({"a": 0.30, "b": 0.60}))
+        profile = calibrator.build_profile(None, Config(calibration_frames=4))
+        self.assertAlmostEqual(profile.good_mean["a"], 0.25)
+        self.assertAlmostEqual(profile.good_mean["b"], 0.40)
+
+    def test_metric_with_coverage_above_threshold_is_kept(self) -> None:
+        calibrator = Calibrator(4)
+        calibrator.start("good")
+        for index in range(4):
+            calibrator.add(_metrics({"a": 0.10, "b": 0.50} if index < 3 else {"a": 0.10}))
+        profile = calibrator.build_profile(None, Config(calibration_frames=4))
+        self.assertIn("b", profile.good_mean)
+
+    def test_metric_with_low_coverage_is_excluded(self) -> None:
+        calibrator = Calibrator(4)
+        calibrator.start("good")
+        calibrator.add(_metrics({"a": 0.10, "b": 0.50, "c": 0.10}))
+        calibrator.add(_metrics({"a": 0.10, "c": 0.10}))
+        calibrator.add(_metrics({"a": 0.10, "c": 0.10}))
+        calibrator.add(_metrics({"a": 0.10, "c": 0.10}))
+        profile = calibrator.build_profile(None, Config(calibration_frames=4))
+        self.assertIn("a", profile.good_mean)
+        self.assertNotIn("b", profile.good_mean)
 
 
 if __name__ == "__main__":

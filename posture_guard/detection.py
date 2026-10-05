@@ -130,8 +130,9 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
 
 
 class RollingMetrics:
-    def __init__(self, window_size: int) -> None:
+    def __init__(self, window_size: int, min_observations: int = 1) -> None:
         self.window_size = window_size
+        self.min_observations = min_observations
         self.items: deque[DetectionMetrics] = deque(maxlen=window_size)
 
     def append(self, metrics: DetectionMetrics) -> None:
@@ -151,17 +152,26 @@ class RollingMetrics:
 
         filtered = [item for item in self.items if item.side == side]
         metric_names = sorted(set().union(*(item.values.keys() for item in filtered)))
-        confidence_names = sorted(set().union(*(item.confidence.keys() for item in filtered)))
         point_names = sorted(set().union(*(item.points.keys() for item in filtered)))
 
-        values = {
-            name: statistics.fmean(item.values[name] for item in filtered if name in item.values)
-            for name in metric_names
-        }
-        confidence = {
-            name: statistics.fmean(item.confidence[name] for item in filtered if name in item.confidence)
-            for name in confidence_names
-        }
+        values: dict[str, float] = {}
+        confidence: dict[str, float] = {}
+        for name in metric_names:
+            observations = [
+                (item.values[name], item.confidence.get(name, 1.0))
+                for item in filtered
+                if name in item.values
+            ]
+            if len(observations) < self.min_observations:
+                continue
+            total_weight = sum(weight for _, weight in observations)
+            if total_weight > 0:
+                values[name] = sum(value * weight for value, weight in observations) / total_weight
+                confidence[name] = total_weight / len(observations)
+            else:
+                values[name] = statistics.fmean(value for value, _ in observations)
+                confidence[name] = 0.0
+
         points = {
             name: (
                 statistics.fmean(item.points[name][0] for item in filtered if name in item.points),

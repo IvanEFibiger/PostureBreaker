@@ -21,6 +21,7 @@ class Config:
     break_repeat_alert_seconds: float = 30.0
     away_reset_seconds: float = 75.0
     calibration_frames: int = 90
+    calibration_min_metric_coverage: float = 0.75
     target_fps: float = 15.0
     max_frame_gap_seconds: float = 30.0
     analytics_sample_seconds: float = 10.0
@@ -32,6 +33,7 @@ class Config:
     headless: bool = False
     history_dir: str = "history"
     smoothing_window: int = 12
+    smoothing_min_observations: int = 6
     default_margins: dict[str, float] = field(
         default_factory=lambda: {
             "ear_shoulder_dx": 0.035,
@@ -61,6 +63,7 @@ _NON_NEGATIVE_FIELDS = ("posture_alert_cooldown_seconds",)
 _AT_LEAST_ONE_FIELDS = (
     "calibration_frames",
     "smoothing_window",
+    "smoothing_min_observations",
     "posture_min_bad_metrics",
     "calibration_min_enabled_metrics",
 )
@@ -81,6 +84,15 @@ def _validate(config: Config) -> None:
     if not _is_number(config.metric_min_confidence) or not 0.0 <= float(config.metric_min_confidence) <= 1.0:
         raise ValueError(
             f"'metric_min_confidence' debe estar entre 0 y 1 (actual: {config.metric_min_confidence!r})."
+        )
+
+    if (
+        not _is_number(config.calibration_min_metric_coverage)
+        or not 0.0 <= float(config.calibration_min_metric_coverage) <= 1.0
+    ):
+        raise ValueError(
+            "'calibration_min_metric_coverage' debe estar entre 0 y 1 "
+            f"(actual: {config.calibration_min_metric_coverage!r})."
         )
 
     for name in _POSITIVE_FIELDS:

@@ -13,6 +13,7 @@
   "break_repeat_alert_seconds": 30.0,
   "away_reset_seconds": 75.0,
   "calibration_frames": 90,
+  "calibration_min_metric_coverage": 0.75,
   "target_fps": 15.0,
   "max_frame_gap_seconds": 30.0,
   "analytics_sample_seconds": 10.0,
@@ -24,6 +25,7 @@
   "headless": false,
   "history_dir": "history",
   "smoothing_window": 12,
+  "smoothing_min_observations": 6,
   "default_margins": {
     "ear_shoulder_dx": 0.035,
     "nose_shoulder_dx": 0.045,

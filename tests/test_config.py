@@ -70,6 +70,26 @@ class ConfigValidationTests(unittest.TestCase):
     def test_metric_min_confidence_default(self) -> None:
         self.assertEqual(Config().metric_min_confidence, 0.60)
 
+    def test_calibration_min_metric_coverage_above_one_raises(self) -> None:
+        self._write({"calibration_min_metric_coverage": 1.5})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_calibration_min_metric_coverage_below_zero_raises(self) -> None:
+        self._write({"calibration_min_metric_coverage": -0.1})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_zero_smoothing_min_observations_raises(self) -> None:
+        self._write({"smoothing_min_observations": 0})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_config_defaults_for_new_fields(self) -> None:
+        config = Config()
+        self.assertEqual(config.calibration_min_metric_coverage, 0.75)
+        self.assertEqual(config.smoothing_min_observations, 6)
+
     def test_negative_duration_raises(self) -> None:
         self._write({"break_interval_minutes": -5})
         with self.assertRaises(ValueError):
