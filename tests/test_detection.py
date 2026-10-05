@@ -311,6 +311,20 @@ class ExtractMetricsTests(unittest.TestCase):
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
         self.assertIsNotNone(metrics.shoulders)
 
+    def test_neck_roll_delta_is_derived_cross_state(self) -> None:
+        landmarks = make_landmarks()
+        landmarks[2] = _Landmark(0.45, 0.5)  # left_eye
+        landmarks[5] = _Landmark(0.55, 0.5)  # right_eye
+        landmarks[11] = _Landmark(0.4, 0.5)  # left_shoulder
+        landmarks[12] = _Landmark(0.6, 0.6)  # right_shoulder
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics.view.neck_roll_delta)
+        self.assertAlmostEqual(
+            metrics.view.neck_roll_delta,
+            metrics.view.head_roll - metrics.shoulders.roll,
+            places=3,
+        )
+
     def test_forward_state_is_attached(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
         self.assertIsNotNone(metrics.forward)

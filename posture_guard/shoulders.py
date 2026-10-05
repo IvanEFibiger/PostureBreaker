@@ -26,21 +26,30 @@ def estimate_shoulder_roll(body: BodyLandmarks, min_visibility: float = 0.0) -> 
     return angle_degrees(right_shoulder.x - left_shoulder.x, right_shoulder.y - left_shoulder.y), confidence
 
 
+def _shoulder_width(image: dict[str, object]) -> float | None:
+    if "left_shoulder" not in image or "right_shoulder" not in image:
+        return None
+    width = distance_2d(image["left_shoulder"], image["right_shoulder"])  # type: ignore[arg-type]
+    return width if width >= EPSILON else None
+
+
 def _side_elevation(body: BodyLandmarks, side: str, min_visibility: float) -> tuple[float | None, float]:
+    """Ear-to-shoulder distance normalized by shoulder width (no hip needed)."""
     image = body.image
-    names = (f"{side}_ear", f"{side}_shoulder", f"{side}_hip")
+    names = (f"{side}_ear", f"{side}_shoulder")
     if any(name not in image for name in names):
         return None, 0.0
-    ear, shoulder, hip = (image[name] for name in names)
+    width = _shoulder_width(image)
+    if width is None:
+        return None, 0.0
 
-    confidence = visibility_confidence(ear, shoulder, hip)
+    ear, shoulder = (image[name] for name in names)
+    left_shoulder = image["left_shoulder"]
+    right_shoulder = image["right_shoulder"]
+    confidence = visibility_confidence(ear, shoulder, left_shoulder, right_shoulder)
     if confidence < max(min_visibility, EPSILON):
         return None, 0.0
-
-    torso_length = distance_2d(shoulder, hip)
-    if torso_length < EPSILON:
-        return None, 0.0
-    return distance_2d(ear, shoulder) / torso_length, confidence
+    return distance_2d(ear, shoulder) / width, confidence
 
 
 def estimate_shoulder_state(body: BodyLandmarks, min_visibility: float = 0.0) -> ShoulderState:

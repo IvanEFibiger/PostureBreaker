@@ -12,7 +12,6 @@ from posture_guard.orientation import (
     estimate_head_pitch,
     estimate_head_roll,
     estimate_head_yaw,
-    estimate_neck_roll_delta,
     estimate_torso_lateral_lean,
     estimate_torso_yaw,
     estimate_view_state,
@@ -108,6 +107,18 @@ class HeadRollTests(unittest.TestCase):
         landmarks = {"left_eye": p(0.5, 0.5), "right_eye": p(0.5, 0.5)}
         self.assertEqual(estimate_head_roll(body(landmarks)), (None, 0.0))
 
+    def test_fuses_eye_and_mouth_lines(self) -> None:
+        image = face(right_eye_y=0.6)  # eye line = +45
+        image["left_mouth"] = p(0.45, 0.6)
+        image["right_mouth"] = p(0.55, 0.6)
+        value, _ = estimate_head_roll(body(image))
+        self.assertAlmostEqual(value, 22.5)
+
+    def test_mouth_only_when_eyes_missing(self) -> None:
+        image = {"left_mouth": p(0.45, 0.5), "right_mouth": p(0.55, 0.5)}
+        value, _ = estimate_head_roll(body(image))
+        self.assertAlmostEqual(value, 0.0)
+
 
 class HeadPitchTests(unittest.TestCase):
     def test_nose_below_eye_line_is_positive(self) -> None:
@@ -119,6 +130,14 @@ class HeadPitchTests(unittest.TestCase):
         landmarks["nose"] = p(0.5, 0.45)
         value, _ = estimate_head_pitch(body(landmarks))
         self.assertAlmostEqual(value, -0.5)
+
+    def test_uses_mouth_line_as_scale(self) -> None:
+        landmarks = face()
+        landmarks["left_mouth"] = p(0.45, 0.70)
+        landmarks["right_mouth"] = p(0.55, 0.70)
+        value, confidence = estimate_head_pitch(body(landmarks))
+        self.assertAlmostEqual(value, 0.25)
+        self.assertAlmostEqual(confidence, 0.9)
 
     def test_missing_eye_returns_none(self) -> None:
         landmarks = face()
@@ -157,7 +176,8 @@ class EstimateViewStateTests(unittest.TestCase):
         state = estimate_view_state(body(image, world=world))
         self.assertAlmostEqual(state.torso_yaw, 0.0)
         self.assertAlmostEqual(state.torso_lateral_lean, 0.0)
-        self.assertAlmostEqual(state.neck_roll_delta, state.head_roll)
+        # neck_roll_delta is derived cross-state, not by the orientation estimator.
+        self.assertIsNone(state.neck_roll_delta)
 
     def test_min_visibility_drops_torso_signals(self) -> None:
         image = face()
@@ -173,7 +193,7 @@ class EstimateViewStateTests(unittest.TestCase):
         self.assertIsNone(state.torso_lateral_lean)
         self.assertIsNone(state.neck_roll_delta)
 
-    def test_per_metric_confidence_and_neck_roll_minimum(self) -> None:
+    def test_per_metric_confidence_is_kept(self) -> None:
         image = face()
         image.update(
             {
@@ -185,7 +205,7 @@ class EstimateViewStateTests(unittest.TestCase):
         )
         state = estimate_view_state(body(image))
         self.assertAlmostEqual(state.confidences["head_roll"], 0.9)
-        self.assertAlmostEqual(state.confidences["neck_roll_delta"], 0.4)
+        self.assertAlmostEqual(state.confidences["torso_lateral_lean"], 0.4)
 
 
 class TorsoYawTests(unittest.TestCase):
@@ -267,26 +287,6 @@ class TorsoLateralLeanTests(unittest.TestCase):
             "right_hip": p(0.6, 0.5),
         }
         self.assertEqual(estimate_torso_lateral_lean(body(image)), (None, 0.0))
-
-
-class NeckRollDeltaTests(unittest.TestCase):
-    def test_subtracts_torso_from_head(self) -> None:
-        value, _ = estimate_neck_roll_delta(10.0, 0.9, 9.0, 0.9)
-        self.assertAlmostEqual(value, 1.0)
-
-    def test_head_only_tilt_keeps_angle(self) -> None:
-        value, _ = estimate_neck_roll_delta(10.0, 0.9, 0.0, 0.9)
-        self.assertAlmostEqual(value, 10.0)
-
-    def test_confidence_is_the_minimum_of_components(self) -> None:
-        _, confidence = estimate_neck_roll_delta(10.0, 0.8, 9.0, 0.4)
-        self.assertAlmostEqual(confidence, 0.4)
-
-    def test_missing_head_roll_is_none(self) -> None:
-        self.assertEqual(estimate_neck_roll_delta(None, 0.9, 9.0, 0.9), (None, 0.0))
-
-    def test_missing_torso_lean_is_none(self) -> None:
-        self.assertEqual(estimate_neck_roll_delta(10.0, 0.9, None, 0.9), (None, 0.0))
 
 
 class AggregateViewTests(unittest.TestCase):

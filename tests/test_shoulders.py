@@ -66,27 +66,27 @@ class ShoulderRollTests(unittest.TestCase):
 class ShoulderElevationTests(unittest.TestCase):
     def test_both_sides_publish_ratio(self) -> None:
         state = estimate_shoulder_state(body(both_sides()))
-        self.assertAlmostEqual(state.left_elevation, 0.2 / 0.3)
-        self.assertAlmostEqual(state.right_elevation, 0.2 / 0.3)
-        self.assertAlmostEqual(state.elevation, 0.2 / 0.3)
+        self.assertAlmostEqual(state.left_elevation, 1.0)
+        self.assertAlmostEqual(state.right_elevation, 1.0)
+        self.assertAlmostEqual(state.elevation, 1.0)
         self.assertAlmostEqual(state.confidence, 0.9)
 
     def test_aggregate_picks_the_most_reliable_side(self) -> None:
         image = both_sides()
-        image["right_ear"] = p(0.6, 0.2)  # right ratio 0.3 / 0.3 = 1.0
+        image["right_ear"] = p(0.6, 0.2)  # right ratio 0.3 / 0.2 = 1.5
         for name in ("right_ear", "right_shoulder", "right_hip"):
             image[name] = Point2D(image[name].x, image[name].y, visibility=0.4)
         state = estimate_shoulder_state(body(image))
-        self.assertAlmostEqual(state.left_elevation, 0.2 / 0.3)
-        self.assertAlmostEqual(state.right_elevation, 1.0)
-        self.assertAlmostEqual(state.elevation, 0.2 / 0.3)
+        self.assertAlmostEqual(state.left_elevation, 1.0)
+        self.assertAlmostEqual(state.right_elevation, 1.5)
+        self.assertAlmostEqual(state.elevation, 1.0)
 
-    def test_missing_hip_drops_that_side(self) -> None:
+    def test_missing_shoulder_drops_both_sides(self) -> None:
         image = both_sides()
-        del image["left_hip"]
+        del image["left_shoulder"]
         state = estimate_shoulder_state(body(image))
         self.assertIsNone(state.left_elevation)
-        self.assertAlmostEqual(state.right_elevation, 0.2 / 0.3)
+        self.assertIsNone(state.right_elevation)
 
     def test_all_sides_missing_leaves_elevation_none(self) -> None:
         image = both_sides()
@@ -96,10 +96,10 @@ class ShoulderElevationTests(unittest.TestCase):
         self.assertIsNone(state.elevation)
         self.assertEqual(state.confidence, 0.0)
 
-    def test_degenerate_torso_is_none(self) -> None:
+    def test_degenerate_shoulder_width_is_none(self) -> None:
         image = both_sides()
-        image["left_hip"] = p(0.4, 0.5)
-        image["right_hip"] = p(0.6, 0.5)
+        image["left_shoulder"] = p(0.4, 0.5)
+        image["right_shoulder"] = p(0.4, 0.5)
         state = estimate_shoulder_state(body(image))
         self.assertIsNone(state.left_elevation)
         self.assertIsNone(state.right_elevation)

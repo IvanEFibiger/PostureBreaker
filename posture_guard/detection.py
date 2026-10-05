@@ -8,7 +8,7 @@ from .config import Config
 from .forward import aggregate_forward, estimate_forward_state
 from .geometry import visibility_confidence
 from .landmarks import extract_body_landmarks
-from .metrics import build_observations
+from .metrics import attach_neck_roll_delta, build_observations
 from .models import CalibrationProfile, DetectionMetrics
 from .orientation import aggregate_view, estimate_view_state
 from .risk import metric_severity
@@ -136,6 +136,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         if body
         else None
     )
+    attach_neck_roll_delta(view, shoulders)
 
     return DetectionMetrics(
         side=side,
@@ -202,6 +203,7 @@ class RollingMetrics:
         view = aggregate_view(item.view for item in filtered)
         shoulders = aggregate_shoulders(item.shoulders for item in filtered)
         forward = aggregate_forward(item.forward for item in filtered)
+        attach_neck_roll_delta(view, shoulders)
         return DetectionMetrics(
             side=side,
             values=values,

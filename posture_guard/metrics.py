@@ -112,6 +112,24 @@ def mean_confidences(states: list[object], field_names: tuple[str, ...]) -> dict
     return confidences
 
 
+def attach_neck_roll_delta(view: ViewState | None, shoulders: ShoulderState | None) -> None:
+    """Derive neck_roll_delta = head_roll - shoulder_roll on the view state.
+
+    Hip-free relation that keeps working with a desk webcam; it mixes torso lean
+    with shoulder asymmetry (unavoidable without the hips).
+    """
+    if view is None:
+        return
+    if shoulders is None or view.head_roll is None or shoulders.roll is None:
+        view.neck_roll_delta = None
+        view.confidences.pop("neck_roll_delta", None)
+        return
+    view.neck_roll_delta = view.head_roll - shoulders.roll
+    view.confidences["neck_roll_delta"] = min(
+        field_confidence(view, "head_roll"), field_confidence(shoulders, "roll")
+    )
+
+
 def build_observations(
     view: ViewState | None,
     shoulders: ShoulderState | None,

@@ -21,8 +21,9 @@ def estimate_head_forward_ratio(
     orientation: str,
     min_visibility: float = 0.0,
 ) -> tuple[float | None, float]:
-    """Canonical signed ear-shoulder offset normalized by torso length.
+    """Canonical signed ear-shoulder offset normalized by shoulder width.
 
+    Hip-free so it works with a desk webcam that only sees head and shoulders.
     The sign is normalized by side so ``HIGHER_IS_WORSE`` stays stable; only
     published for lateral views. The exact inversion still needs camera validation.
     """
@@ -30,20 +31,24 @@ def estimate_head_forward_ratio(
         return None, 0.0
 
     image = body.image
-    names = (f"{side}_ear", f"{side}_shoulder", f"{side}_hip")
+    names = (f"{side}_ear", f"{side}_shoulder")
     if any(name not in image for name in names):
         return None, 0.0
-    ear, shoulder, hip = (image[name] for name in names)
+    if "left_shoulder" not in image or "right_shoulder" not in image:
+        return None, 0.0
+    ear, shoulder = (image[name] for name in names)
+    left_shoulder = image["left_shoulder"]
+    right_shoulder = image["right_shoulder"]
 
-    confidence = visibility_confidence(ear, shoulder, hip)
+    width = distance_2d(left_shoulder, right_shoulder)
+    if width < EPSILON:
+        return None, 0.0
+    confidence = visibility_confidence(ear, shoulder, left_shoulder, right_shoulder)
     if confidence < max(min_visibility, EPSILON):
         return None, 0.0
 
-    torso_length = distance_2d(shoulder, hip)
-    if torso_length < EPSILON:
-        return None, 0.0
     side_sign = 1.0 if side == "right" else -1.0
-    return ((ear.x - shoulder.x) / torso_length) * side_sign, confidence
+    return ((ear.x - shoulder.x) / width) * side_sign, confidence
 
 
 def estimate_torso_forward_angle(

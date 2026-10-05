@@ -25,6 +25,7 @@ def right_side(visibility: float = 0.9) -> dict[str, Point2D]:
     return {
         "right_ear": p(0.45, 0.3, visibility),
         "right_shoulder": p(0.4, 0.5, visibility),
+        "left_shoulder": p(0.2, 0.5, visibility),
         "right_hip": p(0.4, 0.8, visibility),
     }
 
@@ -32,7 +33,7 @@ def right_side(visibility: float = 0.9) -> dict[str, Point2D]:
 class HeadForwardRatioTests(unittest.TestCase):
     def test_lateral_view_publishes_ratio(self) -> None:
         value, confidence = estimate_head_forward_ratio(body(right_side()), "right", "right")
-        self.assertAlmostEqual(value, 0.05 / 0.3)
+        self.assertAlmostEqual(value, 0.05 / 0.2)
         self.assertAlmostEqual(confidence, 0.9)
 
     def test_frontal_view_is_unavailable(self) -> None:
@@ -41,14 +42,14 @@ class HeadForwardRatioTests(unittest.TestCase):
     def test_unknown_view_is_unavailable(self) -> None:
         self.assertEqual(estimate_head_forward_ratio(body(right_side()), "right", "unknown"), (None, 0.0))
 
-    def test_missing_hip_is_none(self) -> None:
+    def test_missing_shoulder_is_none(self) -> None:
         image = right_side()
-        del image["right_hip"]
+        del image["left_shoulder"]
         self.assertEqual(estimate_head_forward_ratio(body(image), "right", "right"), (None, 0.0))
 
-    def test_degenerate_torso_is_none(self) -> None:
+    def test_degenerate_shoulder_width_is_none(self) -> None:
         image = right_side()
-        image["right_hip"] = p(0.4, 0.5)
+        image["left_shoulder"] = p(0.4, 0.5)
         self.assertEqual(estimate_head_forward_ratio(body(image), "right", "right"), (None, 0.0))
 
     def test_low_visibility_is_none(self) -> None:
@@ -62,10 +63,10 @@ class HeadForwardRatioTests(unittest.TestCase):
         image = {
             "left_ear": p(0.55, 0.3),
             "left_shoulder": p(0.6, 0.5),
-            "left_hip": p(0.6, 0.8),
+            "right_shoulder": p(0.8, 0.5),
         }
         value, _ = estimate_head_forward_ratio(body(image), "left", "left")
-        self.assertAlmostEqual(value, 0.05 / 0.3)
+        self.assertAlmostEqual(value, 0.05 / 0.2)
 
     def test_left_side_torso_angle_is_canonicalized(self) -> None:
         image = {"left_shoulder": p(0.5, 0.5), "left_hip": p(0.6, 0.8)}
@@ -111,7 +112,7 @@ class TorsoForwardAngleTests(unittest.TestCase):
 class EstimateForwardStateTests(unittest.TestCase):
     def test_lateral_view_publishes_both(self) -> None:
         state = estimate_forward_state(body(right_side()), "right", "right")
-        self.assertAlmostEqual(state.head_forward_ratio, 0.05 / 0.3)
+        self.assertAlmostEqual(state.head_forward_ratio, 0.05 / 0.2)
         self.assertAlmostEqual(state.torso_forward_angle, 0.0)
         self.assertAlmostEqual(state.confidence, 0.9)
 

@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 from .geometry import (
     EPSILON,
+    Point2D,
     angle_degrees,
     angle_from_vertical,
     distance_2d,
@@ -76,21 +77,43 @@ def estimate_head_yaw(body: BodyLandmarks) -> tuple[float | None, float]:
     return value, confidence
 
 
+def _line_roll(left: Point2D, right: Point2D) -> float:
+    return angle_degrees(right.x - left.x, right.y - left.y)
+
+
 def estimate_head_roll(body: BodyLandmarks) -> tuple[float | None, float]:
-    """Head roll in degrees from the eye line; positive when the right eye is lower."""
+    """Head roll in degrees, fusing the eye line and the mouth line.
+
+    Two roughly parallel face lines make the estimate sturdier than eyes alone;
+    positive when the right side is lower.
+    """
     image = body.image
-    if any(name not in image for name in ("left_eye", "right_eye")):
+    signals: list[tuple[float, float]] = []
+    if "left_eye" in image and "right_eye" in image:
+        left_eye = image["left_eye"]
+        right_eye = image["right_eye"]
+        if distance_2d(left_eye, right_eye) >= EPSILON:
+            signals.append((_line_roll(left_eye, right_eye), visibility_confidence(left_eye, right_eye)))
+    if "left_mouth" in image and "right_mouth" in image:
+        left_mouth = image["left_mouth"]
+        right_mouth = image["right_mouth"]
+        if distance_2d(left_mouth, right_mouth) >= EPSILON:
+            signals.append((_line_roll(left_mouth, right_mouth), visibility_confidence(left_mouth, right_mouth)))
+
+    if not signals:
         return None, 0.0
-    left_eye = image["left_eye"]
-    right_eye = image["right_eye"]
-    if distance_2d(left_eye, right_eye) < EPSILON:
+    value = weighted_average(signals)
+    if value is None:
         return None, 0.0
-    value = angle_degrees(right_eye.x - left_eye.x, right_eye.y - left_eye.y)
-    return value, visibility_confidence(left_eye, right_eye)
+    return value, sum(weight for _, weight in signals) / len(signals)
 
 
 def estimate_head_pitch(body: BodyLandmarks) -> tuple[float | None, float]:
-    """Nose-to-eye-line ratio; positive when the nose drops (looking down)."""
+    """Nose drop below the eye line, scaled by the face height when available.
+
+    Using the mouth line as the scale makes it distance-invariant; falls back to
+    the eye span when the mouth is not visible. Positive when the nose drops.
+    """
     image = body.image
     if any(name not in image for name in ("nose", "left_eye", "right_eye")):
         return None, 0.0
@@ -99,11 +122,20 @@ def estimate_head_pitch(body: BodyLandmarks) -> tuple[float | None, float]:
     right_eye = image["right_eye"]
 
     eye_mid_y = (left_eye.y + right_eye.y) / 2.0
-    eye_span = distance_2d(left_eye, right_eye)
-    if eye_span < EPSILON:
+    scale = 0.0
+    scale_points: list[Point2D] = []
+    if "left_mouth" in image and "right_mouth" in image:
+        mouth_mid_y = (image["left_mouth"].y + image["right_mouth"].y) / 2.0
+        scale = mouth_mid_y - eye_mid_y
+        scale_points = [image["left_mouth"], image["right_mouth"]]
+    if scale < EPSILON:
+        scale = distance_2d(left_eye, right_eye)
+        scale_points = []
+    if scale < EPSILON:
         return None, 0.0
-    value = (nose.y - eye_mid_y) / max(eye_span, EPSILON)
-    return value, visibility_confidence(nose, left_eye, right_eye)
+
+    confidence = visibility_confidence(nose, left_eye, right_eye, *scale_points)
+    return (nose.y - eye_mid_y) / scale, confidence
 
 
 def classify_orientation(head_yaw: float | None) -> str:
@@ -166,38 +198,24 @@ def estimate_torso_lateral_lean(body: BodyLandmarks, min_visibility: float = 0.0
     return angle_from_vertical(dx, dy), confidence
 
 
-def estimate_neck_roll_delta(
-    head_roll: float | None,
-    head_roll_confidence: float,
-    torso_lateral_lean: float | None,
-    torso_lateral_lean_confidence: float,
-) -> tuple[float | None, float]:
-    """Head roll relative to the torso; confidence never exceeds its components."""
-    if head_roll is None or torso_lateral_lean is None:
-        return None, 0.0
-    return head_roll - torso_lateral_lean, min(head_roll_confidence, torso_lateral_lean_confidence)
-
-
 def estimate_view_state(body: BodyLandmarks, min_visibility: float = 0.0) -> ViewState:
     head_yaw, yaw_confidence = estimate_head_yaw(body)
     head_pitch, pitch_confidence = estimate_head_pitch(body)
     head_roll, roll_confidence = estimate_head_roll(body)
     torso_yaw, torso_yaw_confidence = estimate_torso_yaw(body, min_visibility)
     torso_lean, torso_lean_confidence = estimate_torso_lateral_lean(body, min_visibility)
-    neck_roll, neck_roll_confidence = estimate_neck_roll_delta(
-        head_roll, roll_confidence, torso_lean, torso_lean_confidence
-    )
 
+    # neck_roll_delta is derived cross-state (head vs shoulders) in
+    # metrics.attach_neck_roll_delta; it is not a torso-only signal anymore.
     signals = (
         ("head_yaw", head_yaw, yaw_confidence),
         ("head_pitch", head_pitch, pitch_confidence),
         ("head_roll", head_roll, roll_confidence),
         ("torso_yaw", torso_yaw, torso_yaw_confidence),
         ("torso_lateral_lean", torso_lean, torso_lean_confidence),
-        ("neck_roll_delta", neck_roll, neck_roll_confidence),
     )
     confidences = {name: confidence for name, value, confidence in signals if value is not None}
-    present = [confidences[name] for name in confidences]
+    present = list(confidences.values())
 
     return ViewState(
         head_yaw=head_yaw,
@@ -205,7 +223,7 @@ def estimate_view_state(body: BodyLandmarks, min_visibility: float = 0.0) -> Vie
         head_roll=head_roll,
         torso_yaw=torso_yaw,
         torso_lateral_lean=torso_lean,
-        neck_roll_delta=neck_roll,
+        neck_roll_delta=None,
         orientation=classify_orientation(head_yaw),
         confidence=sum(present) / len(present) if present else 0.0,
         confidences=confidences,
