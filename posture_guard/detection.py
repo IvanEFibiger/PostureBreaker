@@ -165,10 +165,11 @@ def classify_posture(
 
     bad_by_metric: dict[str, bool] = {}
     severity: dict[str, float] = {}
+    enabled_metrics = sum(1 for t in profile.thresholds.values() if t.mode != "disabled")
 
     for metric_name, value in metrics.values.items():
         threshold = profile.thresholds.get(metric_name)
-        if not threshold:
+        if not threshold or threshold.mode == "disabled":
             continue
 
         if threshold.mode == "directional":
@@ -184,5 +185,6 @@ def classify_posture(
         severity[metric_name] = normalized
 
     bad_metrics = sum(1 for value in bad_by_metric.values() if value)
-    is_bad = bad_metrics >= max(1, min_bad_metrics)
+    effective_min = max(1, min(min_bad_metrics, enabled_metrics))
+    is_bad = enabled_metrics > 0 and bad_metrics >= effective_min
     return is_bad, bad_by_metric, severity

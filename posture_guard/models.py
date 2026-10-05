@@ -7,7 +7,7 @@ from typing import Any
 @dataclass
 class MetricThreshold:
     threshold: float
-    mode: str  # "directional" or "absolute"
+    mode: str  # "directional", "absolute" or "disabled"
     direction: int | None
     margin: float
 
@@ -19,6 +19,7 @@ class CalibrationProfile:
     good_std: dict[str, float]
     bad_mean: dict[str, float] | None = None
     thresholds: dict[str, MetricThreshold] = field(default_factory=dict)
+    quality_score: float = 0.0
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -26,6 +27,7 @@ class CalibrationProfile:
             "good_mean": self.good_mean,
             "good_std": self.good_std,
             "bad_mean": self.bad_mean,
+            "quality_score": self.quality_score,
             "thresholds": {
                 name: {
                     "threshold": value.threshold,
@@ -49,6 +51,7 @@ class CalibrationProfile:
             good_std=data["good_std"],
             bad_mean=data.get("bad_mean"),
             thresholds=thresholds,
+            quality_score=float(data.get("quality_score", 0.0)),
         )
 
 

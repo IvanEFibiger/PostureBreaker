@@ -101,6 +101,38 @@ class ClassifyPostureTests(unittest.TestCase):
         self.assertEqual(bad_by_metric, {})
         self.assertEqual(severity, {})
 
+    def test_disabled_metric_is_skipped(self) -> None:
+        profile = make_profile()
+        profile.thresholds["ear_shoulder_dx"] = MetricThreshold(0.10, "disabled", None, 0.05)
+        is_bad, bad_by_metric, _ = classify_posture(
+            profile, make_metrics(ear_shoulder_dx=0.0, chin_drop=0.30)
+        )
+        self.assertNotIn("ear_shoulder_dx", bad_by_metric)
+        self.assertFalse(is_bad)
+
+    def test_all_metrics_disabled_is_never_bad(self) -> None:
+        profile = make_profile()
+        for name in list(profile.thresholds):
+            profile.thresholds[name] = MetricThreshold(0.0, "disabled", None, 0.05)
+        is_bad, bad_by_metric, severity = classify_posture(
+            profile, make_metrics(ear_shoulder_dx=0.0, chin_drop=0.9, torso_lean_dx=0.9)
+        )
+        self.assertFalse(is_bad)
+        self.assertEqual(bad_by_metric, {})
+        self.assertEqual(severity, {})
+
+    def test_min_bad_metrics_is_clamped_to_enabled_count(self) -> None:
+        profile = CalibrationProfile(
+            side="right",
+            good_mean={},
+            good_std={},
+            thresholds={"ear_shoulder_dx": MetricThreshold(0.10, "directional", -1, 0.05)},
+        )
+        is_bad, _, _ = classify_posture(
+            profile, make_metrics(ear_shoulder_dx=0.05), min_bad_metrics=2
+        )
+        self.assertTrue(is_bad)
+
     def test_severity_is_never_negative(self) -> None:
         _, _, severity = classify_posture(
             make_profile(), make_metrics(ear_shoulder_dx=0.05, chin_drop=0.30, torso_lean_dx=0.40)

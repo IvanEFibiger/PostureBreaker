@@ -13,6 +13,7 @@ class Config:
     min_visibility: float = 0.55
     sustained_bad_posture_seconds: float = 20.0
     posture_min_bad_metrics: int = 2
+    calibration_min_enabled_metrics: int = 2
     posture_alert_cooldown_seconds: float = 300.0
     break_interval_minutes: float = 45.0
     break_required_seconds: float = 90.0
@@ -54,7 +55,12 @@ _POSITIVE_FIELDS = (
     "focus_break_repeat_seconds",
 )
 _NON_NEGATIVE_FIELDS = ("posture_alert_cooldown_seconds",)
-_AT_LEAST_ONE_FIELDS = ("calibration_frames", "smoothing_window", "posture_min_bad_metrics")
+_AT_LEAST_ONE_FIELDS = (
+    "calibration_frames",
+    "smoothing_window",
+    "posture_min_bad_metrics",
+    "calibration_min_enabled_metrics",
+)
 _NON_EMPTY_TEXT_FIELDS = ("model_path", "database_path", "history_dir")
 
 

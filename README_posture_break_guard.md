@@ -121,6 +121,7 @@ Editá `posture_break_guard.config.json`:
 | `min_visibility` | 0.55 | Visibilidad mínima de landmarks (0-1) |
 | `sustained_bad_posture_seconds` | 20 | Segundos para disparar alerta |
 | `posture_min_bad_metrics` | 2 | Métricas malas necesarias para marcarla como mala |
+| `calibration_min_enabled_metrics` | 2 | Métricas discriminantes mínimas para aceptar la calibración |
 | `posture_alert_cooldown_seconds` | 300 | Cooldown entre alertas |
 | `break_interval_minutes` | 45 | Minutos entre pausas |
 | `break_required_seconds` | 90 | Segundos para validar pausa |

@@ -11,7 +11,6 @@ from .models import CalibrationProfile, DetectionMetrics, MetricThreshold
 
 def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, MetricThreshold]:
     thresholds: dict[str, MetricThreshold] = {}
-    indistinguishable: list[str] = []
 
     for metric_name, good_value in profile.good_mean.items():
         margin = max(
@@ -22,7 +21,13 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
         if profile.bad_mean and metric_name in profile.bad_mean:
             bad_value = profile.bad_mean[metric_name]
             if abs(bad_value - good_value) <= margin:
-                indistinguishable.append(metric_name)
+                thresholds[metric_name] = MetricThreshold(
+                    threshold=good_value,
+                    mode="disabled",
+                    direction=None,
+                    margin=margin,
+                )
+                continue
             direction = 1 if bad_value >= good_value else -1
             threshold = good_value + (bad_value - good_value) * 0.55
             thresholds[metric_name] = MetricThreshold(
@@ -39,14 +44,35 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
                 margin=margin,
             )
 
-    if indistinguishable:
-        raise ValueError(
-            "La postura mala no se distingue de la buena en: "
-            + ", ".join(indistinguishable)
-            + ". Repetí la calibración con una postura mala más marcada."
-        )
-
     return thresholds
+
+
+# Confidence assigned to a metric that only has a good baseline (absolute mode).
+_ABSOLUTE_METRIC_QUALITY = 0.4
+
+
+def calibration_quality(
+    profile: CalibrationProfile,
+    thresholds: dict[str, MetricThreshold],
+) -> float:
+    """Percentage (0-100) of how much the profile discriminates good vs bad posture."""
+    if not thresholds:
+        return 0.0
+
+    scores: list[float] = []
+    for metric_name, threshold in thresholds.items():
+        if threshold.mode == "disabled":
+            scores.append(0.0)
+        elif threshold.mode == "directional" and profile.bad_mean and metric_name in profile.bad_mean:
+            gap = abs(profile.bad_mean[metric_name] - profile.good_mean[metric_name])
+            if threshold.margin > 0:
+                scores.append(min(1.0, gap / (2.0 * threshold.margin)))
+            else:
+                scores.append(1.0)
+        else:
+            scores.append(_ABSOLUTE_METRIC_QUALITY)
+
+    return round(100.0 * sum(scores) / len(scores), 1)
 
 
 class Calibrator:
@@ -136,6 +162,15 @@ class Calibrator:
             raise ValueError("Modo de calibración inválido.")
 
         profile.thresholds = build_thresholds(profile, config)
+        enabled = sum(1 for threshold in profile.thresholds.values() if threshold.mode != "disabled")
+        if enabled < config.calibration_min_enabled_metrics:
+            self.cancel()
+            raise ValueError(
+                f"La calibración solo tiene {enabled} métrica(s) discriminante(s) y se "
+                f"necesitan al menos {config.calibration_min_enabled_metrics}. "
+                "Repetí la calibración con una postura mala más marcada."
+            )
+        profile.quality_score = calibration_quality(profile, profile.thresholds)
         self.cancel()
         return profile
 
