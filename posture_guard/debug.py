@@ -14,19 +14,46 @@ STATE_MISSING = "missing"
 # cv2's Hershey fonts cannot render unicode, so keep the symbols ASCII.
 _STATE_SYMBOLS = {STATE_OK: "ok", STATE_LOW: "?", STATE_MISSING: "--"}
 
-# Number-key labels for the camera window, grouped by validation scenario.
-SNAPSHOT_LABELS: dict[str, str] = {
-    "1": "monitor_1_good",
-    "2": "monitor_2_good",
-    "3": "frontal",
-    "4": "head_forward",
-    "5": "looking_down",
-    "6": "neck_rotated",
-    "7": "neck_and_torso_rotated",
-    "8": "shoulders_raised",
-    "9": "head_tilted",
-    "0": "torso_tilted",
-}
+# Number keys 1-9,0 jump to the first ten labels; "n"/"p" cycle through the rest.
+# Labels follow the controlled validation scenarios.
+SNAPSHOT_LABELS: tuple[str, ...] = (
+    "monitor_1_good",
+    "monitor_2_good",
+    "monitor_1_good_A",
+    "monitor_1_good_B",
+    "front_good",
+    "head_forward",
+    "torso_forward",
+    "head_down",
+    "head_tilt_left",
+    "head_tilt_right",
+    "torso_lean_left",
+    "torso_lean_right",
+    "shoulders_up",
+    "shoulder_left_up",
+    "shoulder_right_up",
+    "head_turn_only",
+    "head_torso_turn",
+)
+
+
+def label_for_digit(char: str) -> str | None:
+    """Map a digit key to a scenario label; "1".."9" then "0"."""
+    if len(char) != 1 or char not in "1234567890":
+        return None
+    index = (int(char) - 1) % 10
+    if index >= len(SNAPSHOT_LABELS):
+        return None
+    return SNAPSHOT_LABELS[index]
+
+
+def next_snapshot_label(current: str | None, step: int) -> str:
+    """Cycle through the scenario labels, tolerating an unknown current value."""
+    if current in SNAPSHOT_LABELS:
+        index = (SNAPSHOT_LABELS.index(current) + step) % len(SNAPSHOT_LABELS)
+    else:
+        index = 0
+    return SNAPSHOT_LABELS[index]
 
 
 def metric_state(value: float | None, confidence: float, min_confidence: float = 0.0) -> str:

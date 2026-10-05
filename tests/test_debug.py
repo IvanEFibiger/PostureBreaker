@@ -7,13 +7,16 @@ import unittest
 from pathlib import Path
 
 from posture_guard.debug import (
+    SNAPSHOT_LABELS,
     STATE_LOW,
     STATE_MISSING,
     STATE_OK,
     append_snapshot,
     build_snapshot,
     format_debug_lines,
+    label_for_digit,
     metric_state,
+    next_snapshot_label,
 )
 from posture_guard.models import DetectionMetrics, ForwardState, MetricObservation, ShoulderState, ViewState
 
@@ -37,6 +40,29 @@ def make_metrics() -> DetectionMetrics:
         forward=ForwardState(head_forward_ratio=0.21, torso_forward_angle=6.5, confidence=0.85),
         observations={"head_yaw": MetricObservation(0.31, 0.92)},
     )
+
+
+class SnapshotLabelTests(unittest.TestCase):
+    def test_labels_are_unique(self) -> None:
+        self.assertEqual(len(SNAPSHOT_LABELS), len(set(SNAPSHOT_LABELS)))
+
+    def test_includes_reproducibility_and_scenarios(self) -> None:
+        for label in ("monitor_1_good_A", "monitor_1_good_B", "head_forward", "shoulders_up", "head_torso_turn"):
+            self.assertIn(label, SNAPSHOT_LABELS)
+
+    def test_digit_keys_map_to_first_ten(self) -> None:
+        self.assertEqual(label_for_digit("1"), SNAPSHOT_LABELS[0])
+        self.assertEqual(label_for_digit("9"), SNAPSHOT_LABELS[8])
+        self.assertEqual(label_for_digit("0"), SNAPSHOT_LABELS[9])
+
+    def test_non_digit_has_no_label(self) -> None:
+        self.assertIsNone(label_for_digit("s"))
+        self.assertIsNone(label_for_digit(""))
+
+    def test_cycling_wraps(self) -> None:
+        self.assertEqual(next_snapshot_label(SNAPSHOT_LABELS[0], -1), SNAPSHOT_LABELS[-1])
+        self.assertEqual(next_snapshot_label(SNAPSHOT_LABELS[-1], 1), SNAPSHOT_LABELS[0])
+        self.assertEqual(next_snapshot_label("unknown", 1), SNAPSHOT_LABELS[0])
 
 
 class MetricStateTests(unittest.TestCase):

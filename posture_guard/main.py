@@ -17,7 +17,13 @@ from .autostart import Autostart
 from .calibration import Calibrator, load_calibration_set, save_calibration_set
 from .camera import CameraError, list_cameras, open_camera
 from .config import Config, apply_settings, load_config, save_config
-from .debug import SNAPSHOT_LABELS, append_snapshot, build_snapshot, format_debug_lines
+from .debug import (
+    append_snapshot,
+    build_snapshot,
+    format_debug_lines,
+    label_for_digit,
+    next_snapshot_label,
+)
 from .detection import RollingMetrics, extract_metrics
 from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
@@ -616,11 +622,12 @@ def _camera_worker(
                 _handle_events(result, store, notifications, smoother, config)
 
                 if shared.consume_command("cmd_snapshot"):
-                    label = str(shared.consume_value("pending_snapshot_label", "manual"))
+                    with shared.lock:
+                        label = shared.pending_snapshot_label
                     try:
                         append_snapshot(
                             _resolve_path(data_dir, config.debug_snapshot_path),
-                            build_snapshot(metrics, label),
+                            build_snapshot(metrics, str(label)),
                         )
                         shared.update(calibration_summary=f"Snapshot guardado: {label}")
                     except OSError:
@@ -757,7 +764,12 @@ def _camera_worker(
                         ),
                     ]
                     draw_text_block(frame, info_lines, (18, 30), (255, 255, 255), scale=0.48)
-                    debug_lines = format_debug_lines(metrics, config.metric_min_confidence)
+                    with shared.lock:
+                        current_label = shared.pending_snapshot_label
+                    debug_lines = [
+                        f"SNAP {current_label}",
+                        *format_debug_lines(metrics, config.metric_min_confidence),
+                    ]
                     draw_text_block(
                         frame,
                         debug_lines,
@@ -836,8 +848,13 @@ def main() -> None:
                     shared.update(cmd_toggle_camera=True)
                 else:
                     char = chr(key) if 0 < key < 128 else ""
-                    if char in SNAPSHOT_LABELS:
-                        label = SNAPSHOT_LABELS[char]
+                    digit_label = label_for_digit(char)
+                    if digit_label is not None:
+                        shared.update(pending_snapshot_label=digit_label, calibration_summary=f"Etiqueta: {digit_label}")
+                    elif char in ("n", "p"):
+                        with shared.lock:
+                            current = shared.pending_snapshot_label
+                        label = next_snapshot_label(current, 1 if char == "n" else -1)
                         shared.update(pending_snapshot_label=label, calibration_summary=f"Etiqueta: {label}")
                     elif char == "s":
                         shared.update(cmd_snapshot=True)
