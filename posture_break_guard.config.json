@@ -4,6 +4,7 @@
   "camera_index": 0,
   "min_visibility": 0.55,
   "sustained_bad_posture_seconds": 20.0,
+  "posture_min_bad_metrics": 2,
   "posture_alert_cooldown_seconds": 300.0,
   "break_interval_minutes": 45.0,
   "break_required_seconds": 90.0,

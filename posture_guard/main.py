@@ -259,7 +259,9 @@ def _camera_worker(
             if has_pose:
                 store.add_work_time(dt_seconds, focus_mode=focus_mode)
 
-            posture_bad, bad_by_metric, severity = classify_posture(profile, metrics)
+            posture_bad, bad_by_metric, severity = classify_posture(
+                profile, metrics, config.posture_min_bad_metrics
+            )
             issue_type, issue_label, issue_guidance, issue_severity = dominant_issue(bad_by_metric, severity)
 
             if has_pose and profile:

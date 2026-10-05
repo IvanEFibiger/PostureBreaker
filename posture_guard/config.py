@@ -12,6 +12,7 @@ class Config:
     camera_index: int = 0
     min_visibility: float = 0.55
     sustained_bad_posture_seconds: float = 20.0
+    posture_min_bad_metrics: int = 2
     posture_alert_cooldown_seconds: float = 300.0
     break_interval_minutes: float = 45.0
     break_required_seconds: float = 90.0

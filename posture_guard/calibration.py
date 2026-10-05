@@ -11,6 +11,7 @@ from .models import CalibrationProfile, DetectionMetrics, MetricThreshold
 
 def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, MetricThreshold]:
     thresholds: dict[str, MetricThreshold] = {}
+    indistinguishable: list[str] = []
 
     for metric_name, good_value in profile.good_mean.items():
         margin = max(
@@ -20,6 +21,8 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
 
         if profile.bad_mean and metric_name in profile.bad_mean:
             bad_value = profile.bad_mean[metric_name]
+            if abs(bad_value - good_value) <= margin:
+                indistinguishable.append(metric_name)
             direction = 1 if bad_value >= good_value else -1
             threshold = good_value + (bad_value - good_value) * 0.55
             thresholds[metric_name] = MetricThreshold(
@@ -35,6 +38,13 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
                 direction=None,
                 margin=margin,
             )
+
+    if indistinguishable:
+        raise ValueError(
+            "La postura mala no se distingue de la buena en: "
+            + ", ".join(indistinguishable)
+            + ". Repetí la calibración con una postura mala más marcada."
+        )
 
     return thresholds
 

@@ -158,6 +158,7 @@ class RollingMetrics:
 def classify_posture(
     profile: CalibrationProfile | None,
     metrics: DetectionMetrics | None,
+    min_bad_metrics: int = 2,
 ) -> tuple[bool, dict[str, bool], dict[str, float]]:
     if not profile or not metrics or metrics.side != profile.side:
         return False, {}, {}
@@ -183,5 +184,5 @@ def classify_posture(
         severity[metric_name] = normalized
 
     bad_metrics = sum(1 for value in bad_by_metric.values() if value)
-    is_bad = bad_metrics >= 2
+    is_bad = bad_metrics >= max(1, min_bad_metrics)
     return is_bad, bad_by_metric, severity

@@ -75,6 +75,18 @@ class ClassifyPostureTests(unittest.TestCase):
         self.assertTrue(is_bad)
         self.assertEqual(sum(1 for is_metric_bad in bad_by_metric.values() if is_metric_bad), 2)
 
+    def test_single_bad_metric_flags_posture_when_min_is_one(self) -> None:
+        is_bad, _, _ = classify_posture(
+            make_profile(), make_metrics(ear_shoulder_dx=0.05), min_bad_metrics=1
+        )
+        self.assertTrue(is_bad)
+
+    def test_min_bad_metrics_is_clamped_to_at_least_one(self) -> None:
+        is_bad, _, _ = classify_posture(
+            make_profile(), make_metrics(ear_shoulder_dx=0.05), min_bad_metrics=0
+        )
+        self.assertTrue(is_bad)
+
     def test_unknown_metric_is_ignored(self) -> None:
         is_bad, bad_by_metric, severity = classify_posture(
             make_profile(), make_metrics(unknown_metric=999.0)
