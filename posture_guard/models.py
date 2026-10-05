@@ -13,6 +13,46 @@ class MetricThreshold:
     weight: float = 1.0
 
 
+@dataclass(frozen=True)
+class MetricObservation:
+    value: float
+    confidence: float
+
+
+@dataclass
+class MetricBaseline:
+    center: float
+    spread: float
+    coverage: float
+    confidence: float
+    sample_count: int
+    mean: float = 0.0
+    std: float = 0.0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "center": self.center,
+            "spread": self.spread,
+            "coverage": self.coverage,
+            "confidence": self.confidence,
+            "sample_count": self.sample_count,
+            "mean": self.mean,
+            "std": self.std,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> MetricBaseline:
+        return cls(
+            center=float(data["center"]),
+            spread=float(data["spread"]),
+            coverage=float(data.get("coverage", 0.0)),
+            confidence=float(data.get("confidence", 0.0)),
+            sample_count=int(data.get("sample_count", 0)),
+            mean=float(data.get("mean", 0.0)),
+            std=float(data.get("std", 0.0)),
+        )
+
+
 @dataclass
 class CalibrationProfile:
     side: str
@@ -66,6 +106,7 @@ class ViewProfile:
     head_yaw_std: float = 0.0
     torso_yaw_std: float = 0.0
     calibration: CalibrationProfile | None = None
+    metric_baselines: dict[str, MetricBaseline] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -78,12 +119,16 @@ class ViewProfile:
                 "torso_yaw_std": self.torso_yaw_std,
             },
             "posture": self.calibration.to_json() if self.calibration else None,
+            "metric_baselines": {
+                name: baseline.to_json() for name, baseline in self.metric_baselines.items()
+            },
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> ViewProfile:
         orientation = data.get("orientation") or {}
         posture = data.get("posture")
+        baselines = data.get("metric_baselines") or {}
         return cls(
             id=str(data.get("id", "principal")),
             name=str(data.get("name", "Principal")),
@@ -92,14 +137,18 @@ class ViewProfile:
             head_yaw_std=float(orientation.get("head_yaw_std", 0.0)),
             torso_yaw_std=float(orientation.get("torso_yaw_std", 0.0)),
             calibration=CalibrationProfile.from_json(posture) if posture else None,
+            metric_baselines={
+                name: MetricBaseline.from_json(payload) for name, payload in baselines.items()
+            },
         )
 
 
 @dataclass
 class CalibrationSet:
-    schema_version: int = 2
+    schema_version: int = 3
     profiles: list[ViewProfile] = field(default_factory=list)
     active_profile_id: str | None = None
+    global_baselines: dict[str, MetricBaseline] = field(default_factory=dict)
 
     def active_profile(self) -> ViewProfile | None:
         for profile in self.profiles:
@@ -112,6 +161,9 @@ class CalibrationSet:
             "schema_version": self.schema_version,
             "profiles": [profile.to_json() for profile in self.profiles],
             "active_profile_id": self.active_profile_id,
+            "global_baselines": {
+                name: baseline.to_json() for name, baseline in self.global_baselines.items()
+            },
         }
 
     @classmethod
@@ -119,11 +171,15 @@ class CalibrationSet:
         # A file without ``schema_version`` is the V1 single-profile format.
         if "schema_version" not in data:
             view = ViewProfile(id="principal", name="Principal", calibration=CalibrationProfile.from_json(data))
-            return cls(schema_version=2, profiles=[view], active_profile_id="principal")
+            return cls(schema_version=3, profiles=[view], active_profile_id="principal")
+        global_payload = data.get("global_baselines") or {}
         return cls(
-            schema_version=int(data.get("schema_version", 2)),
+            schema_version=3,
             profiles=[ViewProfile.from_json(payload) for payload in data.get("profiles", [])],
             active_profile_id=data.get("active_profile_id"),
+            global_baselines={
+                name: MetricBaseline.from_json(payload) for name, payload in global_payload.items()
+            },
         )
 
 
@@ -168,6 +224,7 @@ class DetectionMetrics:
     view: ViewState | None = None
     shoulders: ShoulderState | None = None
     forward: ForwardState | None = None
+    observations: dict[str, MetricObservation] = field(default_factory=dict)
 
 
 @dataclass

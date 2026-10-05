@@ -33,7 +33,16 @@
     "ear_shoulder_dx": 0.035,
     "nose_shoulder_dx": 0.045,
     "chin_drop": 0.03,
-    "torso_lean_dx": 0.04
+    "torso_lean_dx": 0.04,
+    "head_pitch": 0.08,
+    "head_roll": 5.0,
+    "head_forward_ratio": 0.08,
+    "torso_forward_angle": 5.0,
+    "torso_lateral_lean": 5.0,
+    "shoulder_roll": 3.0,
+    "shoulder_elevation": 0.06,
+    "left_shoulder_elevation": 0.06,
+    "right_shoulder_elevation": 0.06
   },
   "default_weights": {
     "neck_yaw_delta": 1.2,

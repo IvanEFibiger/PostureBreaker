@@ -43,6 +43,15 @@ class Config:
             "nose_shoulder_dx": 0.045,
             "chin_drop": 0.030,
             "torso_lean_dx": 0.040,
+            "head_pitch": 0.080,
+            "head_roll": 5.0,
+            "head_forward_ratio": 0.080,
+            "torso_forward_angle": 5.0,
+            "torso_lateral_lean": 5.0,
+            "shoulder_roll": 3.0,
+            "shoulder_elevation": 0.060,
+            "left_shoulder_elevation": 0.060,
+            "right_shoulder_elevation": 0.060,
         }
     )
     default_weights: dict[str, float] = field(

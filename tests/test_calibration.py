@@ -13,7 +13,14 @@ from posture_guard.calibration import (
     save_calibration_set,
 )
 from posture_guard.config import Config
-from posture_guard.models import CalibrationProfile, CalibrationSet, DetectionMetrics, ViewProfile, ViewState
+from posture_guard.models import (
+    CalibrationProfile,
+    CalibrationSet,
+    DetectionMetrics,
+    MetricBaseline,
+    ViewProfile,
+    ViewState,
+)
 
 
 class BuildThresholdsTests(unittest.TestCase):
@@ -227,10 +234,11 @@ class CalibrationSetTests(unittest.TestCase):
     def test_v1_profile_migrates_to_set(self) -> None:
         v1 = CalibrationProfile(side="right", good_mean={"a": 0.1}, good_std={"a": 0.01}).to_json()
         calibration_set = CalibrationSet.from_json(v1)
-        self.assertEqual(calibration_set.schema_version, 2)
+        self.assertEqual(calibration_set.schema_version, 3)
         self.assertEqual(len(calibration_set.profiles), 1)
         self.assertEqual(calibration_set.active_profile().id, "principal")
         self.assertEqual(calibration_set.active_profile().calibration.good_mean, {"a": 0.1})
+        self.assertEqual(calibration_set.global_baselines, {})
 
     def test_set_round_trip_preserves_orientation_and_posture(self) -> None:
         view = ViewProfile(
@@ -241,12 +249,30 @@ class CalibrationSetTests(unittest.TestCase):
             head_yaw_std=0.03,
             torso_yaw_std=0.02,
             calibration=CalibrationProfile(side="right", good_mean={"a": 0.1}, good_std={"a": 0.01}),
+            metric_baselines={"head_roll": MetricBaseline(center=1.0, spread=0.5, coverage=1.0, confidence=0.9, sample_count=50)},
         )
-        calibration_set = CalibrationSet(profiles=[view], active_profile_id="monitor_1")
+        calibration_set = CalibrationSet(
+            profiles=[view],
+            active_profile_id="monitor_1",
+            global_baselines={"neck_roll_delta": MetricBaseline(center=2.0, spread=0.4, coverage=1.0, confidence=0.8, sample_count=50)},
+        )
         restored = CalibrationSet.from_json(calibration_set.to_json())
         self.assertEqual(restored.active_profile().name, "Monitor 1")
         self.assertAlmostEqual(restored.active_profile().head_yaw_mean, 0.38)
         self.assertEqual(restored.active_profile().calibration.side, "right")
+        self.assertAlmostEqual(restored.active_profile().metric_baselines["head_roll"].center, 1.0)
+        self.assertAlmostEqual(restored.global_baselines["neck_roll_delta"].spread, 0.4)
+
+    def test_v2_set_without_baselines_still_loads(self) -> None:
+        payload = {
+            "schema_version": 2,
+            "profiles": [{"id": "m1", "name": "Monitor 1", "orientation": {}}],
+            "active_profile_id": "m1",
+        }
+        restored = CalibrationSet.from_json(payload)
+        self.assertEqual(restored.schema_version, 3)
+        self.assertEqual(restored.active_profile().metric_baselines, {})
+        self.assertEqual(restored.global_baselines, {})
 
     def test_missing_active_id_falls_back_to_first_profile(self) -> None:
         profile = ViewProfile(id="a", name="A")
