@@ -156,6 +156,7 @@ class TrayIcon:
         self._recalibrate_bad = False
         self._toggle_camera_requested = False
         self._toggle_focus_requested = False
+        self._show_window_requested = False
 
         try:
             import pystray  # type: ignore
@@ -177,6 +178,7 @@ class TrayIcon:
     def _build_menu(self) -> Any:
         pystray = self._pystray
         return pystray.Menu(
+            pystray.MenuItem("Mostrar ventana", self._on_show_window),
             pystray.MenuItem("Mostrar/Ocultar camara", self._toggle_camera),
             pystray.MenuItem("Alternar modo foco", self._toggle_focus),
             pystray.Menu.SEPARATOR,
@@ -185,6 +187,9 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Salir", self._on_quit),
         )
+
+    def _on_show_window(self, icon: Any = None, item: Any = None) -> None:
+        self._show_window_requested = True
 
     def _toggle_camera(self, icon: Any = None, item: Any = None) -> None:
         self._toggle_camera_requested = True
@@ -230,11 +235,13 @@ class TrayIcon:
             "recalibrate_bad": self._recalibrate_bad,
             "toggle_camera": self._toggle_camera_requested,
             "toggle_focus": self._toggle_focus_requested,
+            "show_window": self._show_window_requested,
         }
         self._recalibrate_good = False
         self._recalibrate_bad = False
         self._toggle_camera_requested = False
         self._toggle_focus_requested = False
+        self._show_window_requested = False
         return actions
 
     def stop(self) -> None:

@@ -54,6 +54,14 @@ python posture_break_guard.py
 
 Se abre el dashboard con score, estadísticas, controles de calibración, selector de cámara, snooze y herramientas de datos.
 
+## Herramientas de escritorio
+
+- **Inicio automático**: toggle en el dashboard (entrada `Run` de Windows por usuario).
+- **Minimizar a bandeja**: cerrar la ventana la oculta; se sale desde el menú del tray.
+- **Snooze**: silencia las alertas durante `snooze_minutes`.
+- **Diagnóstico**: genera `diagnostics.txt` con versión, Python, modelo, cámaras y rutas.
+- **Selector de cámara**, **exportar** y **borrar historial** desde el panel.
+
 ## Calibración
 
 1. Poné la cámara de costado o semi-costado.

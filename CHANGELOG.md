@@ -19,6 +19,7 @@ Primera versión formal. Núcleo reestructurado a partir del roadmap técnico.
 - Retry/backoff y reconexión de cámara.
 - Instancia única (mutex de Windows).
 - Snooze, selector de cámara, exportar y borrar historial.
+- Inicio automático (Windows), minimizar a bandeja y reporte de diagnóstico.
 - `scripts/fetch_model.py` con verificación SHA256.
 - Suite de tests con `unittest` (sin dependencias externas).
 - CI con GitHub Actions y workflow de release.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -12,10 +13,12 @@ import cv2
 import mediapipe as mp
 
 from . import paths
+from .autostart import Autostart
 from .calibration import Calibrator, load_calibration, save_calibration
 from .camera import CameraError, list_cameras, open_camera
 from .config import Config, load_config, save_config
 from .detection import RollingMetrics, extract_metrics
+from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
 from .notifications import Notifications
@@ -193,6 +196,13 @@ def _load_profile(calibration_path: Path, shared: SharedState):
         return None
 
 
+def _autostart_command(entry_path: Path) -> str:
+    executable = Path(sys.executable)
+    if getattr(sys, "frozen", False):
+        return f'"{executable}"'
+    return f'"{executable}" "{entry_path}"'
+
+
 _METRIC_LABELS = {
     "ear_shoulder_dx": "Cabeza",
     "nose_shoulder_dx": "Cuello",
@@ -286,6 +296,7 @@ def _camera_worker(
         config_path = data_dir / "posture_break_guard.config.json"
         available_cameras = list_cameras(cv2.VideoCapture)
         logger.info("cameras_available=%s", available_cameras)
+        autostart = Autostart("PostureBreaker", _autostart_command(data_dir / "posture_break_guard.py"))
 
         show_camera = False
         shared.update(
@@ -299,6 +310,7 @@ def _camera_worker(
             camera_visible=show_camera,
             available_cameras=available_cameras,
             camera_index=config.camera_index,
+            autostart_enabled=autostart.is_enabled(),
         )
 
         BaseOptions = mp.tasks.BaseOptions
@@ -437,6 +449,33 @@ def _camera_worker(
                         except Exception:
                             logger.exception("config_save_failed")
                         shared.update(camera_index=new_index)
+
+                if shared.consume_command("cmd_toggle_autostart"):
+                    if autostart.supported():
+                        enabled = autostart.toggle()
+                        shared.update(
+                            autostart_enabled=enabled,
+                            calibration_summary=(
+                                f"Inicio automatico {'activado' if enabled else 'desactivado'}"
+                            ),
+                        )
+                    else:
+                        shared.update(calibration_summary="Inicio automatico no soportado en este sistema.")
+                    notifications.generic()
+                if shared.consume_command("cmd_diagnostics"):
+                    try:
+                        report = build_report(
+                            config,
+                            data_dir,
+                            cameras=available_cameras,
+                            log_path=data_dir / "logs" / "posturebreaker.log",
+                        )
+                        dest = data_dir / "diagnostics.txt"
+                        dest.write_text(format_report(report), encoding="utf-8")
+                        shared.update(calibration_summary=f"Diagnostico escrito en {dest.name}")
+                    except Exception:
+                        logger.exception("diagnostics_failed")
+                    notifications.generic()
 
                 if calibrator.is_running():
                     shared.update(
@@ -705,6 +744,8 @@ def main() -> None:
                 shared.update(cmd_toggle_camera=True)
             if actions["toggle_focus"]:
                 shared.update(cmd_toggle_focus=True)
+            if actions["show_window"]:
+                shared.update(cmd_show_window=True)
 
         try:
             if config.headless:
@@ -716,6 +757,15 @@ def main() -> None:
 
             def _ui_loop() -> None:
                 _tray_poll()
+                if shared.consume_command("cmd_hide_window"):
+                    if tray.enabled:
+                        app.withdraw()
+                    else:
+                        shared.update(cmd_quit=True)
+                        app.destroy()
+                        return
+                if shared.consume_command("cmd_show_window"):
+                    app.deiconify()
                 tray.set_status(_tray_status_from_state(shared.snapshot().get("status", "starting")))
                 _show_camera_frame()
                 _pump_overlay()

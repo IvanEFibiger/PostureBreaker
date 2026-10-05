@@ -53,6 +53,7 @@ class SharedState:
     camera_index: int = 0
     calibration_quality: float = 0.0
     calibration_summary: str = ""
+    autostart_enabled: bool = False
 
     cmd_calibrate_good: bool = False
     cmd_calibrate_bad: bool = False
@@ -63,6 +64,10 @@ class SharedState:
     cmd_clear_history: bool = False
     cmd_export_history: bool = False
     cmd_set_camera: bool = False
+    cmd_toggle_autostart: bool = False
+    cmd_diagnostics: bool = False
+    cmd_hide_window: bool = False
+    cmd_show_window: bool = False
     cmd_quit: bool = False
     pending_camera_index: int = -1
 

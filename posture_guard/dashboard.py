@@ -221,6 +221,15 @@ class Dashboard(ctk.CTk):
         self._btn_good.grid(row=0, column=0, padx=6, pady=6, sticky="ew")
         self._btn_bad = ctk.CTkButton(btn_frame, text="Calibrar mala", fg_color=ORANGE, hover_color="#EA580C", font=("Segoe UI", 13, "bold"), command=self._on_cal_bad)
         self._btn_bad.grid(row=0, column=1, padx=6, pady=6, sticky="ew")
+        self._cal_hint = ctk.CTkLabel(
+            btn_frame,
+            text="Camara de costado. Calibra 'buena' sentado normal y 'mala' con tu postura problema.",
+            font=("Segoe UI", 10),
+            text_color=TEXT_SECONDARY,
+            wraplength=420,
+            justify="left",
+        )
+        self._cal_hint.grid(row=1, column=0, columnspan=2, padx=6, pady=(0, 6), sticky="w")
 
         btn_frame2 = ctk.CTkFrame(host, fg_color=BG_COLOR)
         btn_frame2.grid(row=6, column=0, sticky="ew", padx=24, pady=(0, 4))
@@ -288,6 +297,9 @@ class Dashboard(ctk.CTk):
         data_row.columnconfigure((0, 1), weight=1)
         ctk.CTkButton(data_row, text="Exportar datos", command=self._on_export, fg_color=BLUE, hover_color="#1D4ED8", font=("Segoe UI", 12)).grid(row=0, column=0, padx=(0, 6), sticky="ew")
         ctk.CTkButton(data_row, text="Borrar historial", command=self._on_clear_history, fg_color="#9CA3AF", hover_color="#6B7280", font=("Segoe UI", 12)).grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        self._autostart_btn = ctk.CTkButton(tools, text="Inicio automatico: off", command=self._on_toggle_autostart, fg_color="#6B7280", hover_color="#4B5563", font=("Segoe UI", 12))
+        self._autostart_btn.pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkButton(tools, text="Generar diagnostico", command=self._on_diagnostics, fg_color="#6B7280", hover_color="#4B5563", font=("Segoe UI", 12)).pack(fill="x", padx=16, pady=(0, 6))
         self._tools_hint = ctk.CTkLabel(tools, text="", font=("Segoe UI", 11), text_color=TEXT_SECONDARY, wraplength=420, justify="left")
         self._tools_hint.pack(anchor="w", padx=16, pady=(0, 14))
 
@@ -373,6 +385,12 @@ class Dashboard(ctk.CTk):
         cameras = [str(index) for index in snap.get("available_cameras", [])]
         if cameras and list(self._camera_menu.cget("values")) != cameras:
             self._camera_menu.configure(values=cameras)
+        autostart_on = bool(snap.get("autostart_enabled", False))
+        self._autostart_btn.configure(
+            text=f"Inicio automatico: {'on' if autostart_on else 'off'}",
+            fg_color="#0F766E" if autostart_on else "#6B7280",
+            hover_color="#115E59" if autostart_on else "#4B5563",
+        )
         self._tools_hint.configure(text=str(snap.get("calibration_summary", "")))
 
         self.after(self.POLL_MS, self._poll)
@@ -408,6 +426,11 @@ class Dashboard(ctk.CTk):
     def _on_clear_history(self) -> None:
         self._shared.update(cmd_clear_history=True)
 
+    def _on_toggle_autostart(self) -> None:
+        self._shared.update(cmd_toggle_autostart=True)
+
+    def _on_diagnostics(self) -> None:
+        self._shared.update(cmd_diagnostics=True)
+
     def _on_close(self) -> None:
-        self._shared.update(cmd_quit=True)
-        self.destroy()
+        self._shared.update(cmd_hide_window=True)
