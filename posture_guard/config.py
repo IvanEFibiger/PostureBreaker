@@ -12,6 +12,7 @@ class Config:
     camera_index: int = 0
     min_visibility: float = 0.55
     metric_min_confidence: float = 0.60
+    posture_v2_observe_only: bool = True
     sustained_bad_posture_seconds: float = 20.0
     posture_min_bad_metrics: int = 2
     calibration_min_enabled_metrics: int = 2
@@ -42,6 +43,17 @@ class Config:
             "nose_shoulder_dx": 0.045,
             "chin_drop": 0.030,
             "torso_lean_dx": 0.040,
+        }
+    )
+    default_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "neck_yaw_delta": 1.2,
+            "head_forward_ratio": 1.5,
+            "head_pitch": 1.0,
+            "neck_roll_delta": 0.8,
+            "shoulder_elevation": 1.1,
+            "shoulder_roll": 0.7,
+            "torso_forward_angle": 1.2,
         }
     )
 
@@ -121,11 +133,22 @@ def _validate(config: Config) -> None:
     if not isinstance(config.headless, bool):
         raise ValueError(f"'headless' debe ser true o false (actual: {config.headless!r}).")
 
+    if not isinstance(config.posture_v2_observe_only, bool):
+        raise ValueError(
+            f"'posture_v2_observe_only' debe ser true o false (actual: {config.posture_v2_observe_only!r})."
+        )
+
     if not isinstance(config.default_margins, dict):
         raise ValueError("'default_margins' debe ser un objeto con márgenes numéricos.")
     for name, value in config.default_margins.items():
         if not _is_number(value) or value < 0:
             raise ValueError(f"'default_margins.{name}' debe ser un número mayor o igual a 0 (actual: {value!r}).")
+
+    if not isinstance(config.default_weights, dict):
+        raise ValueError("'default_weights' debe ser un objeto con pesos numéricos.")
+    for name, value in config.default_weights.items():
+        if not _is_number(value) or value < 0:
+            raise ValueError(f"'default_weights.{name}' debe ser un número mayor o igual a 0 (actual: {value!r}).")
 
 
 def load_config(path: Path) -> Config:

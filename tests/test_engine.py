@@ -160,6 +160,51 @@ class SnoozeTests(unittest.TestCase):
         result = engine.update(good_metrics(), True, 60.0, 100.0)
         self.assertNotIn(Event.BREAK_ALERT, result.events)
 
+    def test_v2_risk_is_reported_in_parallel(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        result = engine.update(bad_metrics(), True, 0.5, 1.0)
+        self.assertGreater(result.risk_score, 0.0)
+        self.assertEqual(result.dominant_issue, "head_forward")
+        self.assertTrue(result.dominant_issue_label)
+
+    def test_v2_risk_is_empty_without_bad_metric(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        result = engine.update(good_metrics(), True, 0.5, 1.0)
+        self.assertEqual(result.risk_score, 0.0)
+        self.assertIsNone(result.dominant_issue)
+
+    def test_v2_issue_events_suppressed_while_observing(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        result = engine.update(bad_metrics(), True, 25.0, 1000.0)
+        self.assertNotIn(Event.ISSUE_STARTED, result.events)
+        self.assertNotIn(Event.ISSUE_ALERT, result.events)
+        self.assertGreater(result.dominant_issue_streak_seconds, 0.0)
+
+    def test_v2_issue_alert_when_activated(self) -> None:
+        engine = PostureEngine(make_config(posture_v2_observe_only=False), make_profile())
+        result = engine.update(bad_metrics(), True, 25.0, 1000.0)
+        self.assertIn(Event.ISSUE_STARTED, result.events)
+        self.assertIn(Event.ISSUE_ALERT, result.events)
+
+    def test_v2_load_alert_for_load_based_issue(self) -> None:
+        profile = CalibrationProfile(
+            side="right",
+            good_mean={},
+            good_std={},
+            thresholds={"head_yaw": MetricThreshold(0.2, "directional", 1, 0.1, weight=1.2)},
+        )
+        engine = PostureEngine(make_config(posture_v2_observe_only=False, max_frame_gap_seconds=1000.0), profile)
+        metrics = DetectionMetrics(side="right", values={"head_yaw": 0.5}, points={})
+        result = engine.update(metrics, True, 130.0, 1000.0)
+        self.assertIn(Event.POSTURE_LOAD_ALERT, result.events)
+        self.assertGreater(result.dominant_issue_load, 0.0)
+
+    def test_v2_issue_recovery_event(self) -> None:
+        engine = PostureEngine(make_config(posture_v2_observe_only=False), make_profile())
+        engine.update(bad_metrics(), True, 1.0, 1000.0)
+        result = engine.update(good_metrics(), True, 1.0, 1001.0)
+        self.assertIn(Event.ISSUE_RECOVERED, result.events)
+
 
 if __name__ == "__main__":
     unittest.main()

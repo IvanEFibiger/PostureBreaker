@@ -90,6 +90,21 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(config.calibration_min_metric_coverage, 0.75)
         self.assertEqual(config.smoothing_min_observations, 6)
         self.assertEqual(config.debug_snapshot_path, "history/debug_snapshots.jsonl")
+        self.assertTrue(config.posture_v2_observe_only)
+        self.assertEqual(config.view_switch_stability_seconds, 0.75)
+
+    def test_invalid_observe_only_type_raises(self) -> None:
+        self._write({"posture_v2_observe_only": "yes"})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_default_weights_are_present(self) -> None:
+        self.assertEqual(Config().default_weights["head_forward_ratio"], 1.5)
+
+    def test_negative_default_weight_raises(self) -> None:
+        self._write({"default_weights": {"head_yaw": -1.0}})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
 
     def test_negative_duration_raises(self) -> None:
         self._write({"break_interval_minutes": -5})

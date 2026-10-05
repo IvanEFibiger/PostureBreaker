@@ -10,6 +10,7 @@ from .geometry import visibility_confidence
 from .landmarks import extract_body_landmarks
 from .models import CalibrationProfile, DetectionMetrics
 from .orientation import aggregate_view, estimate_view_state
+from .risk import metric_severity
 from .shoulders import aggregate_shoulders, estimate_shoulder_state
 
 # MediaPipe Pose landmark indices.
@@ -237,17 +238,9 @@ def classify_posture(
         value = metrics.values[metric_name]
         threshold = profile.thresholds[metric_name]
 
-        if threshold.mode == "directional":
-            signed_distance = (value - threshold.threshold) * (threshold.direction or 1)
-            bad = signed_distance > 0
-            normalized = max(0.0, signed_distance / max(threshold.margin, 1e-6))
-        else:
-            distance = abs(value - threshold.threshold)
-            bad = distance > threshold.margin
-            normalized = max(0.0, (distance - threshold.margin) / max(threshold.margin, 1e-6))
-
-        bad_by_metric[metric_name] = bad
-        severity[metric_name] = normalized
+        metric_severity_value = metric_severity(value, threshold)
+        bad_by_metric[metric_name] = metric_severity_value > 0
+        severity[metric_name] = metric_severity_value
 
     available_count = len(available_enabled)
     bad_metrics = sum(1 for value in bad_by_metric.values() if value)

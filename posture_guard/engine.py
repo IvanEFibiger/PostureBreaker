@@ -6,7 +6,9 @@ from enum import StrEnum
 from .alerts import BreakManager
 from .config import Config
 from .detection import classify_posture, dominant_issue
+from .issues import issue_details, policy_for
 from .models import AlertState, CalibrationProfile, DetectionMetrics
+from .risk import IssueEvaluation, evaluate_issues
 from .timing import is_session_gap
 
 
@@ -23,6 +25,10 @@ class Event(StrEnum):
     FOCUS_ENDED = "focus_ended"
     SESSION_GAP = "session_gap"
     VIEW_CHANGED = "view_changed"
+    ISSUE_STARTED = "issue_started"
+    ISSUE_RECOVERED = "issue_recovered"
+    ISSUE_ALERT = "issue_alert"
+    POSTURE_LOAD_ALERT = "posture_load_alert"
 
 
 @dataclass
@@ -48,6 +54,13 @@ class EngineResult:
     session_gap_seconds: float = 0.0
     snoozed: bool = False
     events: list[Event] = field(default_factory=list)
+    risk_score: float = 0.0
+    dominant_issue: str | None = None
+    dominant_issue_label: str = ""
+    dominant_issue_guidance: str = ""
+    dominant_issue_severity: float = 0.0
+    dominant_issue_streak_seconds: float = 0.0
+    dominant_issue_load: float = 0.0
 
 
 class PostureEngine:
@@ -61,6 +74,9 @@ class PostureEngine:
         self.break_manager = BreakManager(config, self.state)
         self.focus_mode = False
         self.snooze_until = 0.0
+        self.issue_streaks: dict[str, float] = {}
+        self.issue_loads: dict[str, float] = {}
+        self._issue_alert_at: dict[str, float] = {}
 
     def set_profile(self, profile: CalibrationProfile | None) -> None:
         self.profile = profile
@@ -73,6 +89,8 @@ class PostureEngine:
     def reset_posture_state(self) -> None:
         self.state.posture_active = False
         self.state.bad_posture_streak = 0.0
+        self.issue_streaks.clear()
+        self.issue_loads.clear()
 
     def toggle_focus(self) -> Event:
         self.focus_mode = not self.focus_mode
@@ -111,6 +129,8 @@ class PostureEngine:
             session_gap_seconds = dt
             self.state.bad_posture_streak = 0.0
             self.state.posture_active = False
+            self.issue_streaks.clear()
+            self.issue_loads.clear()
             self.break_manager.reset_continuity()
             events.append(Event.SESSION_GAP)
             dt = 0.0
@@ -122,6 +142,41 @@ class PostureEngine:
             self.config.metric_min_confidence,
         )
         issue_type, issue_label, issue_guidance, issue_severity = dominant_issue(bad_by_metric, severity)
+
+        evaluation = (
+            evaluate_issues(metrics.values, metrics.confidence, self.profile, self.config.metric_min_confidence)
+            if self.profile and metrics
+            else IssueEvaluation()
+        )
+        v2_label, v2_guidance = issue_details(evaluation.dominant_issue)
+
+        observed: set[str] = set()
+        for issue, weighted in evaluation.severity_by_issue.items():
+            key = issue.value
+            observed.add(key)
+            was_issue_active = key in self.issue_streaks
+            self.issue_streaks[key] = self.issue_streaks.get(key, 0.0) + dt
+            policy = policy_for(issue)
+            if policy.load_based:
+                self.issue_loads[key] = self.issue_loads.get(key, 0.0) + weighted * dt
+            if self.config.posture_v2_observe_only:
+                continue
+            if not was_issue_active:
+                events.append(Event.ISSUE_STARTED)
+            last_alert = self._issue_alert_at.get(key, 0.0)
+            if self.issue_streaks[key] >= policy.threshold_seconds and now - last_alert >= policy.cooldown_seconds:
+                self._issue_alert_at[key] = now
+                events.append(Event.POSTURE_LOAD_ALERT if policy.load_based else Event.ISSUE_ALERT)
+
+        for key in [name for name in self.issue_streaks if name not in observed]:
+            del self.issue_streaks[key]
+            self.issue_loads.pop(key, None)
+            if not self.config.posture_v2_observe_only:
+                events.append(Event.ISSUE_RECOVERED)
+
+        dominant_key = evaluation.dominant_issue.value if evaluation.dominant_issue else None
+        dominant_streak = self.issue_streaks.get(dominant_key, 0.0) if dominant_key else 0.0
+        dominant_load = self.issue_loads.get(dominant_key, 0.0) if dominant_key else 0.0
 
         was_active = self.state.posture_active
         threshold = self._posture_threshold()
@@ -191,4 +246,11 @@ class PostureEngine:
             session_gap_seconds=session_gap_seconds,
             snoozed=snoozed,
             events=events,
+            risk_score=evaluation.risk_score,
+            dominant_issue=evaluation.dominant_issue.value if evaluation.dominant_issue else None,
+            dominant_issue_label=v2_label,
+            dominant_issue_guidance=v2_guidance,
+            dominant_issue_severity=evaluation.dominant_severity,
+            dominant_issue_streak_seconds=dominant_streak,
+            dominant_issue_load=dominant_load,
         )

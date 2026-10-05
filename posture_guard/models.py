@@ -10,6 +10,7 @@ class MetricThreshold:
     mode: str  # "directional", "absolute" or "disabled"
     direction: int | None
     margin: float
+    weight: float = 1.0
 
 
 @dataclass
@@ -34,6 +35,7 @@ class CalibrationProfile:
                     "mode": value.mode,
                     "direction": value.direction,
                     "margin": value.margin,
+                    "weight": value.weight,
                 }
                 for name, value in self.thresholds.items()
             },

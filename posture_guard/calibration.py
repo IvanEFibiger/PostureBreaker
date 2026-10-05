@@ -16,6 +16,7 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
             config.default_margins.get(metric_name, 0.03),
             profile.good_std.get(metric_name, 0.0) * 2.5,
         )
+        weight = config.default_weights.get(metric_name, 1.0)
 
         if profile.bad_mean and metric_name in profile.bad_mean:
             bad_value = profile.bad_mean[metric_name]
@@ -25,6 +26,7 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
                     mode="disabled",
                     direction=None,
                     margin=margin,
+                    weight=weight,
                 )
                 continue
             direction = 1 if bad_value >= good_value else -1
@@ -34,6 +36,7 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
                 mode="directional",
                 direction=direction,
                 margin=margin,
+                weight=weight,
             )
         else:
             thresholds[metric_name] = MetricThreshold(
@@ -41,6 +44,7 @@ def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, M
                 mode="absolute",
                 direction=None,
                 margin=margin,
+                weight=weight,
             )
 
     return thresholds
