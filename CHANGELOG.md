@@ -30,7 +30,8 @@ Primera versión formal. Núcleo reestructurado a partir del roadmap técnico.
 - Trend horario ahora se calcula sobre tiempo real y no sobre score acumulado.
 - Detección de gaps temporales por suspensión (no suma tiempo falso).
 - Pacing de FPS sobre el ciclo completo.
-- Validación de visibilidad de cadera en la métrica de torso.
+- La cadera ya no invalida el frame completo: el torso se evalúa solo cuando la cadera es visible (antes podía dejar de detectar postura del todo si la cadera quedaba fuera de cuadro).
+- La media móvil y la calibración ahora toleran métricas parciales (cadera intermitente).
 
 ### Removed
 

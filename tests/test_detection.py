@@ -4,6 +4,7 @@ import unittest
 
 from posture_guard.config import Config
 from posture_guard.detection import (
+    RollingMetrics,
     classify_posture,
     dominant_issue,
     extract_metrics,
@@ -196,15 +197,33 @@ class ExtractMetricsTests(unittest.TestCase):
         self.assertEqual(metrics.side, "right")
         self.assertIn("torso_lean_dx", metrics.values)
 
-    def test_returns_none_when_hip_is_not_visible(self) -> None:
+    def test_hip_not_visible_drops_torso_metric_but_keeps_pose(self) -> None:
         landmarks = make_landmarks()
         landmarks[24].visibility = 0.1
-        self.assertIsNone(extract_metrics(_Result(landmarks), Config(), preferred_side="right"))
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics)
+        self.assertNotIn("torso_lean_dx", metrics.values)
+        self.assertIn("ear_shoulder_dx", metrics.values)
+
+    def test_hip_visible_includes_torso_metric(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertIn("torso_lean_dx", metrics.values)
 
     def test_respects_preferred_side(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="left")
         self.assertIsNotNone(metrics)
         self.assertEqual(metrics.side, "left")
+
+
+class RollingMetricsTests(unittest.TestCase):
+    def test_mean_tolerates_metric_missing_in_some_samples(self) -> None:
+        smoother = RollingMetrics(window_size=4)
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.1}, points={}))
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.3, "b": 0.5}, points={}))
+        mean = smoother.mean()
+        self.assertIsNotNone(mean)
+        self.assertAlmostEqual(mean.values["a"], 0.2)
+        self.assertAlmostEqual(mean.values["b"], 0.5)
 
 
 if __name__ == "__main__":

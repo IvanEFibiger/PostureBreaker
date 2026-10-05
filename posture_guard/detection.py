@@ -96,7 +96,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
     hip = landmarks[hip_idx]
     nose = landmarks[NOSE]
 
-    required = [ear, shoulder, hip, nose]
+    required = [ear, shoulder, nose]
     if any(lm.visibility < config.min_visibility for lm in required):
         return None
 
@@ -104,8 +104,9 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         "ear_shoulder_dx": ear.x - shoulder.x,
         "nose_shoulder_dx": nose.x - shoulder.x,
         "chin_drop": nose.y - ear.y,
-        "torso_lean_dx": shoulder.x - hip.x,
     }
+    if hip.visibility >= config.min_visibility:
+        values["torso_lean_dx"] = shoulder.x - hip.x
 
     points = {
         "ear": (ear.x, ear.y),
@@ -138,17 +139,17 @@ class RollingMetrics:
         side = max(side_counts, key=side_counts.get)
 
         filtered = [item for item in self.items if item.side == side]
-        metric_names = list(filtered[0].values.keys())
-        point_names = list(filtered[0].points.keys())
+        metric_names = sorted(set().union(*(item.values.keys() for item in filtered)))
+        point_names = sorted(set().union(*(item.points.keys() for item in filtered)))
 
         values = {
-            name: statistics.fmean(item.values[name] for item in filtered)
+            name: statistics.fmean(item.values[name] for item in filtered if name in item.values)
             for name in metric_names
         }
         points = {
             name: (
-                statistics.fmean(item.points[name][0] for item in filtered),
-                statistics.fmean(item.points[name][1] for item in filtered),
+                statistics.fmean(item.points[name][0] for item in filtered if name in item.points),
+                statistics.fmean(item.points[name][1] for item in filtered if name in item.points),
             )
             for name in point_names
         }

@@ -124,20 +124,16 @@ class Calibrator:
                 side_counts[side] = side_counts.get(side, 0) + 1
             dominant_side = max(side_counts, key=side_counts.get)
             side_samples = [values for side, values in self.samples if side == dominant_side]
-        metric_names = list(side_samples[0].keys())
+        metric_names = sorted(set().union(*(sample.keys() for sample in side_samples)))
 
         mean_values = {
-            name: statistics.fmean(sample[name] for sample in side_samples)
+            name: statistics.fmean(sample[name] for sample in side_samples if name in sample)
             for name in metric_names
         }
-        std_values = {
-            name: (
-                statistics.pstdev(sample[name] for sample in side_samples)
-                if len(side_samples) > 1
-                else 0.0
-            )
-            for name in metric_names
-        }
+        std_values: dict[str, float] = {}
+        for name in metric_names:
+            present = [sample[name] for sample in side_samples if name in sample]
+            std_values[name] = statistics.pstdev(present) if len(present) > 1 else 0.0
 
         if self.mode == "good":
             profile = CalibrationProfile(

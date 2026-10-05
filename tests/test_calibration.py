@@ -155,6 +155,15 @@ class BuildProfileTests(unittest.TestCase):
         self.assertEqual(modes["c"], "disabled")
         self.assertGreater(profile.quality_score, 0.0)
 
+    def test_partial_samples_are_averaged_over_present_frames(self) -> None:
+        calibrator = Calibrator(2)
+        calibrator.start("good")
+        calibrator.add(_metrics({"a": 0.10}))
+        calibrator.add(_metrics({"a": 0.30, "b": 0.50}))
+        profile = calibrator.build_profile(None, Config(calibration_frames=2))
+        self.assertAlmostEqual(profile.good_mean["a"], 0.20)
+        self.assertEqual(profile.good_mean["b"], 0.50)
+
 
 if __name__ == "__main__":
     unittest.main()
