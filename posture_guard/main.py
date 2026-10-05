@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-import sys
+import logging
 import threading
 import time
 from pathlib import Path
@@ -9,14 +9,18 @@ from pathlib import Path
 import cv2
 import mediapipe as mp
 
+from . import paths
 from .calibration import Calibrator, load_calibration, save_calibration
 from .config import Config, load_config
 from .detection import RollingMetrics, extract_metrics
 from .engine import EngineResult, Event, PostureEngine
+from .logging_setup import setup_logging
 from .notifications import Notifications
 from .state import SharedState
 from .storage import AnalyticsStore
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
+
+logger = logging.getLogger(__name__)
 
 BREAK_ROUTINES = [
     {
@@ -47,15 +51,6 @@ BREAK_ROUTINES = [
         "rule": "Una pausa corta vale mas que seguir duro 40 minutos mas.",
     },
 ]
-
-
-def _runtime_dirs() -> tuple[Path, Path]:
-    if getattr(sys, "frozen", False):
-        data_dir = Path(sys.executable).resolve().parent
-        resource_dir = Path(getattr(sys, "_MEIPASS", data_dir)).resolve()
-        return data_dir, resource_dir
-    source_dir = Path(__file__).resolve().parent.parent
-    return source_dir, source_dir
 
 
 def _resolve_path(base_dir: Path, raw_path: str) -> Path:
@@ -475,7 +470,10 @@ def _camera_worker(
 
 
 def main() -> None:
-    data_dir, resource_dir = _runtime_dirs()
+    data_dir, resource_dir = paths.resolve_dirs()
+    setup_logging(data_dir / "logs")
+    logger.info("app_started data_dir=%s", data_dir)
+
     config_path = data_dir / "posture_break_guard.config.json"
     calibration_path = data_dir / "posture_calibration.json"
 
