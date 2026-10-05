@@ -142,6 +142,7 @@ Editá `posture_break_guard.config.json`:
 | `break_required_seconds` | 90 | Segundos para validar pausa |
 | `target_fps` | 15 | FPS objetivo (reduce CPU) |
 | `max_frame_gap_seconds` | 30 | Gap tratado como suspensión (no suma tiempo) |
+| `snooze_minutes` | 15 | Minutos que silencia las alertas el botón snooze |
 | `headless` | false | Arrancar sin ventana |
 | `history_dir` | "history" | Carpeta de historial |
 

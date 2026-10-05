@@ -13,8 +13,8 @@ import mediapipe as mp
 
 from . import paths
 from .calibration import Calibrator, load_calibration, save_calibration
-from .camera import CameraError, open_camera
-from .config import Config, load_config
+from .camera import CameraError, list_cameras, open_camera
+from .config import Config, load_config, save_config
 from .detection import RollingMetrics, extract_metrics
 from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
@@ -193,6 +193,49 @@ def _load_profile(calibration_path: Path, shared: SharedState):
         return None
 
 
+_METRIC_LABELS = {
+    "ear_shoulder_dx": "Cabeza",
+    "nose_shoulder_dx": "Cuello",
+    "chin_drop": "Menton",
+    "torso_lean_dx": "Torso",
+}
+
+
+def _calibration_summary(profile) -> str:
+    enabled = [
+        _METRIC_LABELS.get(name, name)
+        for name, threshold in profile.thresholds.items()
+        if threshold.mode != "disabled"
+    ]
+    disabled = [
+        _METRIC_LABELS.get(name, name)
+        for name, threshold in profile.thresholds.items()
+        if threshold.mode == "disabled"
+    ]
+    parts = [f"Calidad: {profile.quality_score:.0f}%"]
+    if enabled:
+        parts.append("Detecta: " + ", ".join(enabled))
+    if disabled:
+        parts.append("Ignora: " + ", ".join(disabled))
+    return " | ".join(parts)
+
+
+def _switch_camera(cap: Any, config: Config, shared: SharedState, new_index: int) -> Any:
+    try:
+        if cap is not None:
+            cap.release()
+    except Exception:
+        pass
+    shared.update(status="camera_reconnecting")
+    try:
+        new_cap = open_camera(cv2.VideoCapture, new_index)
+    except CameraError:
+        logger.error("camera_switch_failed index=%s", new_index)
+        return None
+    logger.info("camera_switched index=%s", new_index)
+    return new_cap
+
+
 def _reconnect_camera(cap: Any, config: Config, shared: SharedState) -> Any:
     logger.warning("camera_read_failed; reconnecting")
     try:
@@ -240,6 +283,10 @@ def _camera_worker(
             return
         store.start_session(config.camera_index)
 
+        config_path = data_dir / "posture_break_guard.config.json"
+        available_cameras = list_cameras(cv2.VideoCapture)
+        logger.info("cameras_available=%s", available_cameras)
+
         show_camera = False
         shared.update(
             calibrated=profile is not None,
@@ -250,6 +297,8 @@ def _camera_worker(
             top_errors=store.top_errors(),
             focus_mode=False,
             camera_visible=show_camera,
+            available_cameras=available_cameras,
+            camera_index=config.camera_index,
         )
 
         BaseOptions = mp.tasks.BaseOptions
@@ -346,12 +395,48 @@ def _camera_worker(
                     if calibration_path.exists():
                         calibration_path.unlink()
                     notifications.generic()
-                    shared.update(calibrated=False, status="no_calibration")
+                    shared.update(
+                        calibrated=False,
+                        status="no_calibration",
+                        calibration_quality=0.0,
+                        calibration_summary="",
+                    )
                 if shared.consume_command("cmd_toggle_camera"):
                     show_camera = not show_camera
                 if shared.consume_command("cmd_toggle_focus"):
                     engine.toggle_focus()
                     store.set_focus_mode(engine.focus_mode)
+                if shared.consume_command("cmd_snooze"):
+                    engine.snooze(now_ts, config.snooze_minutes)
+                    notifications.generic()
+                if shared.consume_command("cmd_clear_history"):
+                    store.clear_history()
+                    notifications.generic()
+                if shared.consume_command("cmd_export_history"):
+                    try:
+                        dest = store.export_history(data_dir / "posture_export.json")
+                        shared.update(calibration_summary=f"Datos exportados a {dest.name}")
+                    except Exception:
+                        logger.exception("export_failed")
+                    notifications.generic()
+                if shared.consume_command("cmd_set_camera"):
+                    new_index = int(shared.consume_value("pending_camera_index", -1))
+                    if new_index >= 0 and new_index != config.camera_index:
+                        new_cap = _switch_camera(cap, config, shared, new_index)
+                        if new_cap is None:
+                            shared.update(
+                                status="error",
+                                error_code="CAMERA_UNAVAILABLE",
+                                error_message="No pude abrir la camara seleccionada.",
+                            )
+                            return
+                        cap = new_cap
+                        config.camera_index = new_index
+                        try:
+                            save_config(config_path, config)
+                        except Exception:
+                            logger.exception("config_save_failed")
+                        shared.update(camera_index=new_index)
 
                 if calibrator.is_running():
                     shared.update(
@@ -372,6 +457,8 @@ def _camera_worker(
                                     calibrated=True,
                                     calibrating_mode="",
                                     calibration_progress=0.0,
+                                    calibration_quality=profile.quality_score,
+                                    calibration_summary=_calibration_summary(profile),
                                 )
                             except Exception as exc:
                                 calibrator.cancel()

@@ -19,6 +19,7 @@
   "focus_posture_multiplier": 2.0,
   "focus_cooldown_multiplier": 2.0,
   "focus_break_repeat_seconds": 180.0,
+  "snooze_minutes": 15.0,
   "headless": false,
   "history_dir": "history",
   "smoothing_window": 12,

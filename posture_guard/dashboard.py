@@ -276,6 +276,21 @@ class Dashboard(ctk.CTk):
         self._errors_body = ctk.CTkLabel(self._errors_frame, text="Aun no hay datos suficientes.", font=("Segoe UI", 12), text_color=TEXT_PRIMARY, justify="left", wraplength=420)
         self._errors_body.pack(anchor="w", padx=16, pady=(6, 14))
 
+        tools = ctk.CTkFrame(host, fg_color=CARD_COLOR, corner_radius=16)
+        tools.grid(row=13, column=0, sticky="ew", padx=24, pady=(0, 24))
+        ctk.CTkLabel(tools, text="Herramientas", font=("Segoe UI", 12, "bold"), text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(14, 0))
+        self._camera_menu = ctk.CTkOptionMenu(tools, values=["0"], font=("Segoe UI", 12))
+        self._camera_menu.pack(fill="x", padx=16, pady=(6, 6))
+        ctk.CTkButton(tools, text="Aplicar camara", command=self._on_apply_camera, fg_color=BLUE, hover_color="#1D4ED8", font=("Segoe UI", 12)).pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkButton(tools, text="Silenciar alertas (snooze)", command=self._on_snooze, fg_color="#6B7280", hover_color="#4B5563", font=("Segoe UI", 12)).pack(fill="x", padx=16, pady=(0, 6))
+        data_row = ctk.CTkFrame(tools, fg_color="transparent")
+        data_row.pack(fill="x", padx=16, pady=(0, 6))
+        data_row.columnconfigure((0, 1), weight=1)
+        ctk.CTkButton(data_row, text="Exportar datos", command=self._on_export, fg_color=BLUE, hover_color="#1D4ED8", font=("Segoe UI", 12)).grid(row=0, column=0, padx=(0, 6), sticky="ew")
+        ctk.CTkButton(data_row, text="Borrar historial", command=self._on_clear_history, fg_color="#9CA3AF", hover_color="#6B7280", font=("Segoe UI", 12)).grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        self._tools_hint = ctk.CTkLabel(tools, text="", font=("Segoe UI", 11), text_color=TEXT_SECONDARY, wraplength=420, justify="left")
+        self._tools_hint.pack(anchor="w", padx=16, pady=(0, 14))
+
     def _format_error_list(self, top_errors: list[dict[str, Any]]) -> str:
         if not top_errors:
             return "Aun no hay alertas suficientes para sacar patrones."
@@ -355,6 +370,11 @@ class Dashboard(ctk.CTk):
         self._week_chart.set_series("Ultimos 7 dias", list(snap.get("weekly_trend", [])))
         self._errors_body.configure(text=self._format_error_list(list(snap.get("top_errors", []))))
 
+        cameras = [str(index) for index in snap.get("available_cameras", [])]
+        if cameras and list(self._camera_menu.cget("values")) != cameras:
+            self._camera_menu.configure(values=cameras)
+        self._tools_hint.configure(text=str(snap.get("calibration_summary", "")))
+
         self.after(self.POLL_MS, self._poll)
 
     def _on_cal_good(self) -> None:
@@ -371,6 +391,22 @@ class Dashboard(ctk.CTk):
 
     def _on_toggle_focus(self) -> None:
         self._shared.update(cmd_toggle_focus=True)
+
+    def _on_apply_camera(self) -> None:
+        try:
+            index = int(self._camera_menu.get())
+        except (TypeError, ValueError):
+            return
+        self._shared.update(pending_camera_index=index, cmd_set_camera=True)
+
+    def _on_snooze(self) -> None:
+        self._shared.update(cmd_snooze=True)
+
+    def _on_export(self) -> None:
+        self._shared.update(cmd_export_history=True)
+
+    def _on_clear_history(self) -> None:
+        self._shared.update(cmd_clear_history=True)
 
     def _on_close(self) -> None:
         self._shared.update(cmd_quit=True)

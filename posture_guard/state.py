@@ -49,13 +49,22 @@ class SharedState:
     hourly_trend: list[dict[str, Any]] = field(default_factory=list)
     weekly_trend: list[dict[str, Any]] = field(default_factory=list)
     top_errors: list[dict[str, Any]] = field(default_factory=list)
+    available_cameras: list[int] = field(default_factory=list)
+    camera_index: int = 0
+    calibration_quality: float = 0.0
+    calibration_summary: str = ""
 
     cmd_calibrate_good: bool = False
     cmd_calibrate_bad: bool = False
     cmd_clear_calibration: bool = False
     cmd_toggle_camera: bool = False
     cmd_toggle_focus: bool = False
+    cmd_snooze: bool = False
+    cmd_clear_history: bool = False
+    cmd_export_history: bool = False
+    cmd_set_camera: bool = False
     cmd_quit: bool = False
+    pending_camera_index: int = -1
 
     def update(self, **kwargs: object) -> None:
         with self.lock:
@@ -71,4 +80,10 @@ class SharedState:
             value = getattr(self, name, False)
             if value:
                 setattr(self, name, False)
+            return value
+
+    def consume_value(self, name: str, default: object) -> Any:
+        with self.lock:
+            value = getattr(self, name, default)
+            setattr(self, name, default)
             return value

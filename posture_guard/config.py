@@ -27,6 +27,7 @@ class Config:
     focus_posture_multiplier: float = 2.0
     focus_cooldown_multiplier: float = 2.0
     focus_break_repeat_seconds: float = 180.0
+    snooze_minutes: float = 15.0
     headless: bool = False
     history_dir: str = "history"
     smoothing_window: int = 12
@@ -53,6 +54,7 @@ _POSITIVE_FIELDS = (
     "focus_posture_multiplier",
     "focus_cooldown_multiplier",
     "focus_break_repeat_seconds",
+    "snooze_minutes",
 )
 _NON_NEGATIVE_FIELDS = ("posture_alert_cooldown_seconds",)
 _AT_LEAST_ONE_FIELDS = (
