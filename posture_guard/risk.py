@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from .config import Config
 from .issues import PostureIssue, issue_for_metric
-from .metrics import normalize_observation, resolve_baseline, spec_for
+from .metrics import min_confidence_for, normalize_observation, resolve_baseline, spec_for
 from .models import CalibrationProfile, MetricBaseline, MetricObservation, MetricThreshold
 
 
@@ -57,9 +57,11 @@ def evaluate_issues(
             continue
 
         weighted = severity * max(threshold.weight, 0.0) * metric_confidence
-        evaluation.risk_score += weighted
         evaluation.severity_by_issue[issue] = max(evaluation.severity_by_issue.get(issue, 0.0), weighted)
 
+    # Correlated metrics of the same issue must not inflate the score: risk is
+    # the sum of one severity per issue, not per metric.
+    evaluation.risk_score = sum(evaluation.severity_by_issue.values())
     if evaluation.severity_by_issue:
         evaluation.dominant_issue = max(evaluation.severity_by_issue, key=evaluation.severity_by_issue.get)
         evaluation.dominant_severity = evaluation.severity_by_issue[evaluation.dominant_issue]
@@ -84,17 +86,18 @@ def evaluate_v2_issues(
             continue
         baseline = resolve_baseline(name, spec, view_baselines, global_baselines)
         margin = config.default_margins.get(name, 0.03)
-        severity = normalize_observation(observation, baseline, spec, margin)
+        gate = min_confidence_for(spec, config)
+        severity = normalize_observation(observation, baseline, spec, margin, gate)
         if severity <= 0:
             continue
 
         weight = config.default_weights.get(name, spec.default_weight)
         weighted = severity * max(weight, 0.0) * observation.confidence
-        evaluation.risk_score += weighted
         evaluation.severity_by_issue[spec.issue] = max(
             evaluation.severity_by_issue.get(spec.issue, 0.0), weighted
         )
 
+    evaluation.risk_score = sum(evaluation.severity_by_issue.values())
     if evaluation.severity_by_issue:
         evaluation.dominant_issue = max(evaluation.severity_by_issue, key=evaluation.severity_by_issue.get)
         evaluation.dominant_severity = evaluation.severity_by_issue[evaluation.dominant_issue]

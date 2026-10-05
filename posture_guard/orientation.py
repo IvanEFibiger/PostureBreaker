@@ -13,7 +13,7 @@ from .geometry import (
     weighted_average,
 )
 from .landmarks import BodyLandmarks
-from .metrics import mean_confidences
+from .metrics import field_confidence, mean_confidences
 from .models import ViewState
 
 # Provisional center band for the categorical orientation, in the same
@@ -220,7 +220,11 @@ def aggregate_view(views: Iterable[ViewState | None]) -> ViewState | None:
 
     values: dict[str, float | None] = {}
     for field_name in VIEW_FIELDS:
-        pairs = [(getattr(state, field_name), state.confidence) for state in states if getattr(state, field_name) is not None]
+        pairs = [
+            (getattr(state, field_name), field_confidence(state, field_name))
+            for state in states
+            if getattr(state, field_name) is not None
+        ]
         values[field_name] = weighted_average(pairs) if pairs else None
 
     confidence = sum(state.confidence for state in states) / len(states)

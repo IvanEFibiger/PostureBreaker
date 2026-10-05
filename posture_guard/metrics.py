@@ -49,7 +49,8 @@ class MetricSpec:
     calibration_scope: CalibrationScope
     deviation_mode: DeviationMode
     default_weight: float = 1.0
-    min_confidence: float = 0.6
+    # None -> fall back to the global Config.metric_min_confidence at runtime.
+    min_confidence: float | None = None
 
 
 # Semantic knowledge lives here, not in the calibration: calibration only learns
@@ -85,12 +86,24 @@ def spec_for(metric_name: str) -> MetricSpec | None:
     return METRIC_SPECS.get(metric_name)
 
 
+def min_confidence_for(spec: MetricSpec, config: Config) -> float:
+    """Effective gate: a spec override wins, otherwise the global config value."""
+    if spec.min_confidence is not None:
+        return spec.min_confidence
+    return config.metric_min_confidence
+
+
+def field_confidence(state: object, field_name: str) -> float:
+    """Per-field confidence, falling back to the state's global confidence."""
+    return getattr(state, "confidences", {}).get(field_name, getattr(state, "confidence", 0.0))
+
+
 def mean_confidences(states: list[object], field_names: tuple[str, ...]) -> dict[str, float]:
     """Average the per-field confidence of each state, falling back to its global one."""
     confidences: dict[str, float] = {}
     for name in field_names:
         present = [
-            getattr(state, "confidences", {}).get(name, getattr(state, "confidence", 0.0))
+            field_confidence(state, name)
             for state in states
             if getattr(state, name, None) is not None
         ]
@@ -193,9 +206,13 @@ def normalize_observation(
     baseline: MetricBaseline | None,
     spec: MetricSpec,
     configured_margin: float,
+    min_confidence: float | None = None,
 ) -> float:
     """Severity of a signal relative to its calibrated baseline, or 0.0 if fine."""
-    if baseline is None or observation.confidence < spec.min_confidence:
+    gate = min_confidence
+    if gate is None:
+        gate = spec.min_confidence if spec.min_confidence is not None else 0.0
+    if baseline is None or observation.confidence < gate:
         return 0.0
 
     deviation = observation.value - baseline.center

@@ -11,6 +11,7 @@ from posture_guard.metrics import (
     MetricSpec,
     build_metric_baselines,
     build_observations,
+    min_confidence_for,
     normalize_observation,
     resolve_baseline,
     spec_for,
@@ -59,6 +60,22 @@ class NormalizeObservationTests(unittest.TestCase):
             normalize_observation(MetricObservation(13.0, 1.0), baseline(spread=5.0), VIEW_SPEC, 0.5),
             0.0,
         )
+
+    def test_explicit_min_confidence_gate(self) -> None:
+        self.assertEqual(
+            normalize_observation(MetricObservation(10.0, 0.5), baseline(), VIEW_SPEC, 0.5, min_confidence=0.8),
+            0.0,
+        )
+
+
+class MinConfidenceForTests(unittest.TestCase):
+    def test_spec_override_wins(self) -> None:
+        spec = MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, min_confidence=0.9)
+        self.assertEqual(min_confidence_for(spec, Config(metric_min_confidence=0.6)), 0.9)
+
+    def test_falls_back_to_config(self) -> None:
+        spec = MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE)
+        self.assertEqual(min_confidence_for(spec, Config(metric_min_confidence=0.7)), 0.7)
 
 
 class BuildMetricBaselinesTests(unittest.TestCase):

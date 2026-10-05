@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 from .geometry import EPSILON, angle_degrees, distance_2d, visibility_confidence, weighted_average
 from .landmarks import BodyLandmarks
-from .metrics import mean_confidences
+from .metrics import field_confidence, mean_confidences
 from .models import ShoulderState
 
 SHOULDER_FIELDS = ("roll", "left_elevation", "right_elevation", "elevation")
@@ -97,7 +97,11 @@ def aggregate_shoulders(states: Iterable[ShoulderState | None]) -> ShoulderState
 
     values: dict[str, float | None] = {}
     for field_name in SHOULDER_FIELDS:
-        pairs = [(getattr(state, field_name), state.confidence) for state in present if getattr(state, field_name) is not None]
+        pairs = [
+            (getattr(state, field_name), field_confidence(state, field_name))
+            for state in present
+            if getattr(state, field_name) is not None
+        ]
         values[field_name] = weighted_average(pairs) if pairs else None
 
     confidence = sum(state.confidence for state in present) / len(present)

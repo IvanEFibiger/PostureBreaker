@@ -322,6 +322,12 @@ class AggregateViewTests(unittest.TestCase):
         self.assertIsNone(merged.torso_lateral_lean)
         self.assertIsNone(merged.neck_roll_delta)
 
+    def test_weighted_by_per_field_confidence(self) -> None:
+        first = ViewState(head_roll=1.0, confidence=0.1, confidences={"head_roll": 1.0})
+        second = ViewState(head_roll=2.0, confidence=1.0, confidences={"head_roll": 0.0})
+        merged = aggregate_view([first, second])
+        self.assertAlmostEqual(merged.head_roll, 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
