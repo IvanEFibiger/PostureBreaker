@@ -30,6 +30,14 @@ def make_metrics(side: str = "right", **values: float) -> DetectionMetrics:
     return DetectionMetrics(side=side, values=dict(values), points={})
 
 
+def make_metrics_with_confidence(
+    values: dict[str, float],
+    confidence: dict[str, float],
+    side: str = "right",
+) -> DetectionMetrics:
+    return DetectionMetrics(side=side, values=dict(values), confidence=dict(confidence), points={})
+
+
 class ClassifyPostureTests(unittest.TestCase):
     def test_no_profile_is_not_bad(self) -> None:
         result = classify_posture(None, make_metrics(ear_shoulder_dx=0.0))
@@ -70,7 +78,8 @@ class ClassifyPostureTests(unittest.TestCase):
 
     def test_single_bad_metric_is_not_enough_to_flag_posture(self) -> None:
         is_bad, bad_by_metric, _ = classify_posture(
-            make_profile(), make_metrics(ear_shoulder_dx=0.05)
+            make_profile(),
+            make_metrics(ear_shoulder_dx=0.05, chin_drop=0.20, torso_lean_dx=0.30),
         )
         self.assertFalse(is_bad)
         self.assertEqual(sum(1 for is_metric_bad in bad_by_metric.values() if is_metric_bad), 1)
@@ -154,6 +163,64 @@ class ClassifyPostureTests(unittest.TestCase):
         self.assertTrue(all(value >= 0.0 for value in severity.values()))
 
 
+class ClassifyPostureAvailabilityTests(unittest.TestCase):
+    def test_absent_metric_is_not_evaluated(self) -> None:
+        profile = make_profile()
+        _, bad_by_metric, severity = classify_posture(profile, make_metrics(ear_shoulder_dx=0.05))
+        self.assertNotIn("chin_drop", bad_by_metric)
+        self.assertNotIn("torso_lean_dx", severity)
+
+    def test_all_metrics_absent_is_not_bad(self) -> None:
+        self.assertEqual(classify_posture(make_profile(), make_metrics()), (False, {}, {}))
+
+    def test_low_confidence_metric_is_excluded(self) -> None:
+        metrics = make_metrics_with_confidence(
+            {"ear_shoulder_dx": 0.05, "chin_drop": 0.20},
+            {"ear_shoulder_dx": 0.20, "chin_drop": 0.90},
+        )
+        is_bad, bad_by_metric, _ = classify_posture(
+            make_profile(), metrics, min_confidence=0.60
+        )
+        self.assertNotIn("ear_shoulder_dx", bad_by_metric)
+        self.assertFalse(is_bad)
+
+    def test_confidence_at_threshold_is_accepted(self) -> None:
+        metrics = make_metrics_with_confidence(
+            {"ear_shoulder_dx": 0.05, "chin_drop": 0.20},
+            {"ear_shoulder_dx": 0.60, "chin_drop": 0.90},
+        )
+        _, bad_by_metric, _ = classify_posture(make_profile(), metrics, min_confidence=0.60)
+        self.assertIn("ear_shoulder_dx", bad_by_metric)
+        self.assertTrue(bad_by_metric["ear_shoulder_dx"])
+
+    def test_only_available_metrics_drive_classification(self) -> None:
+        profile = CalibrationProfile(
+            side="right",
+            good_mean={},
+            good_std={},
+            thresholds={
+                "a": MetricThreshold(0.10, "directional", 1, 0.05),
+                "b": MetricThreshold(0.10, "directional", 1, 0.05),
+                "c": MetricThreshold(0.10, "directional", 1, 0.05),
+                "d": MetricThreshold(0.10, "directional", 1, 0.05),
+            },
+        )
+        metrics = make_metrics(a=0.20, b=0.05)
+        is_bad, bad_by_metric, _ = classify_posture(profile, metrics, min_bad_metrics=2)
+        self.assertEqual(sorted(bad_by_metric), ["a", "b"])
+        self.assertTrue(is_bad)
+
+    def test_all_low_confidence_is_not_bad(self) -> None:
+        metrics = make_metrics_with_confidence(
+            {"ear_shoulder_dx": 0.0, "chin_drop": 0.90},
+            {"ear_shoulder_dx": 0.10, "chin_drop": 0.10},
+        )
+        self.assertEqual(
+            classify_posture(make_profile(), metrics, min_confidence=0.60),
+            (False, {}, {}),
+        )
+
+
 class DominantIssueTests(unittest.TestCase):
     def test_picks_highest_severity_bad_metric(self) -> None:
         name, label, guidance, severity = dominant_issue(
@@ -222,6 +289,19 @@ class ExtractMetricsTests(unittest.TestCase):
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
         self.assertIn("torso_lean_dx", metrics.values)
 
+    def test_confidence_is_reported_for_every_metric(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertEqual(set(metrics.confidence), set(metrics.values))
+        self.assertTrue(all(0.0 <= value <= 1.0 for value in metrics.confidence.values()))
+
+    def test_confidence_reflects_landmark_visibility(self) -> None:
+        landmarks = make_landmarks(visibility=0.9)
+        landmarks[0].visibility = 0.65  # nose
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        self.assertAlmostEqual(metrics.confidence["chin_drop"], 0.65)
+        self.assertAlmostEqual(metrics.confidence["nose_shoulder_dx"], 0.65)
+        self.assertAlmostEqual(metrics.confidence["ear_shoulder_dx"], 0.9)
+
     def test_respects_preferred_side(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="left")
         self.assertIsNotNone(metrics)
@@ -237,6 +317,14 @@ class RollingMetricsTests(unittest.TestCase):
         self.assertIsNotNone(mean)
         self.assertAlmostEqual(mean.values["a"], 0.2)
         self.assertAlmostEqual(mean.values["b"], 0.5)
+
+    def test_mean_averages_confidence_over_present_samples(self) -> None:
+        smoother = RollingMetrics(window_size=4)
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.1}, confidence={"a": 0.8}, points={}))
+        smoother.append(DetectionMetrics(side="right", values={"a": 0.3}, confidence={"a": 0.4}, points={}))
+        mean = smoother.mean()
+        self.assertIsNotNone(mean)
+        self.assertAlmostEqual(mean.confidence["a"], 0.6)
 
 
 if __name__ == "__main__":

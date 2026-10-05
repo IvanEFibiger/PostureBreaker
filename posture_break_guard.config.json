@@ -3,6 +3,7 @@
   "database_path": "history/posture_guard.db",
   "camera_index": 0,
   "min_visibility": 0.55,
+  "metric_min_confidence": 0.6,
   "sustained_bad_posture_seconds": 20.0,
   "posture_min_bad_metrics": 2,
   "calibration_min_enabled_metrics": 2,

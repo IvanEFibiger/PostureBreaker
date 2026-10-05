@@ -11,6 +11,7 @@ class Config:
     database_path: str = "history/posture_guard.db"
     camera_index: int = 0
     min_visibility: float = 0.55
+    metric_min_confidence: float = 0.60
     sustained_bad_posture_seconds: float = 20.0
     posture_min_bad_metrics: int = 2
     calibration_min_enabled_metrics: int = 2
@@ -76,6 +77,11 @@ def _validate(config: Config) -> None:
 
     if not _is_number(config.min_visibility) or not 0.0 <= float(config.min_visibility) <= 1.0:
         raise ValueError(f"'min_visibility' debe estar entre 0 y 1 (actual: {config.min_visibility!r}).")
+
+    if not _is_number(config.metric_min_confidence) or not 0.0 <= float(config.metric_min_confidence) <= 1.0:
+        raise ValueError(
+            f"'metric_min_confidence' debe estar entre 0 y 1 (actual: {config.metric_min_confidence!r})."
+        )
 
     for name in _POSITIVE_FIELDS:
         value = getattr(config, name)

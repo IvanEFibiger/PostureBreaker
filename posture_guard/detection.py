@@ -75,6 +75,11 @@ def choose_side(landmarks: list[Any], min_visibility: float) -> str | None:
     return max(scored, key=lambda item: item[1])[0]
 
 
+def _visibility_confidence(*landmarks: Any) -> float:
+    """Lowest landmark visibility involved in a metric, in [0, 1]."""
+    return min(float(lm.visibility) for lm in landmarks)
+
+
 def extract_metrics(result: Any, config: Config, preferred_side: str | None = None) -> DetectionMetrics | None:
     if not result.pose_landmarks:
         return None
@@ -105,8 +110,14 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         "nose_shoulder_dx": nose.x - shoulder.x,
         "chin_drop": nose.y - ear.y,
     }
+    confidence = {
+        "ear_shoulder_dx": _visibility_confidence(ear, shoulder),
+        "nose_shoulder_dx": _visibility_confidence(nose, shoulder),
+        "chin_drop": _visibility_confidence(nose, ear),
+    }
     if hip.visibility >= config.min_visibility:
         values["torso_lean_dx"] = shoulder.x - hip.x
+        confidence["torso_lean_dx"] = _visibility_confidence(shoulder, hip)
 
     points = {
         "ear": (ear.x, ear.y),
@@ -115,7 +126,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         "nose": (nose.x, nose.y),
     }
 
-    return DetectionMetrics(side=side, values=values, points=points)
+    return DetectionMetrics(side=side, values=values, confidence=confidence, points=points)
 
 
 class RollingMetrics:
@@ -140,11 +151,16 @@ class RollingMetrics:
 
         filtered = [item for item in self.items if item.side == side]
         metric_names = sorted(set().union(*(item.values.keys() for item in filtered)))
+        confidence_names = sorted(set().union(*(item.confidence.keys() for item in filtered)))
         point_names = sorted(set().union(*(item.points.keys() for item in filtered)))
 
         values = {
             name: statistics.fmean(item.values[name] for item in filtered if name in item.values)
             for name in metric_names
+        }
+        confidence = {
+            name: statistics.fmean(item.confidence[name] for item in filtered if name in item.confidence)
+            for name in confidence_names
         }
         points = {
             name: (
@@ -153,25 +169,35 @@ class RollingMetrics:
             )
             for name in point_names
         }
-        return DetectionMetrics(side=side, values=values, points=points)
+        return DetectionMetrics(side=side, values=values, confidence=confidence, points=points)
 
 
 def classify_posture(
     profile: CalibrationProfile | None,
     metrics: DetectionMetrics | None,
     min_bad_metrics: int = 2,
+    min_confidence: float = 0.0,
 ) -> tuple[bool, dict[str, bool], dict[str, float]]:
     if not profile or not metrics or metrics.side != profile.side:
         return False, {}, {}
 
     bad_by_metric: dict[str, bool] = {}
     severity: dict[str, float] = {}
-    enabled_metrics = sum(1 for t in profile.thresholds.values() if t.mode != "disabled")
 
-    for metric_name, value in metrics.values.items():
-        threshold = profile.thresholds.get(metric_name)
-        if not threshold or threshold.mode == "disabled":
-            continue
+    # A metric only counts when it is enabled in the profile, present in this
+    # frame and reliable enough. Missing confidence is treated as fully trusted
+    # so legacy metrics keep their previous behaviour.
+    available_enabled = [
+        name
+        for name in metrics.values
+        if name in profile.thresholds
+        and profile.thresholds[name].mode != "disabled"
+        and metrics.confidence.get(name, 1.0) >= min_confidence
+    ]
+
+    for metric_name in available_enabled:
+        value = metrics.values[metric_name]
+        threshold = profile.thresholds[metric_name]
 
         if threshold.mode == "directional":
             signed_distance = (value - threshold.threshold) * (threshold.direction or 1)
@@ -185,9 +211,10 @@ def classify_posture(
         bad_by_metric[metric_name] = bad
         severity[metric_name] = normalized
 
+    available_count = len(available_enabled)
     bad_metrics = sum(1 for value in bad_by_metric.values() if value)
-    # Never require every enabled metric to be bad: leave room for one to be off.
-    cap = enabled_metrics - 1 if enabled_metrics > 1 else 1
+    # Never require every available metric to be bad: leave room for one to be off.
+    cap = available_count - 1 if available_count > 1 else 1
     effective_min = max(1, min(min_bad_metrics, cap))
-    is_bad = enabled_metrics > 0 and bad_metrics >= effective_min
+    is_bad = available_count > 0 and bad_metrics >= effective_min
     return is_bad, bad_by_metric, severity

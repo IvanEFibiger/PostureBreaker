@@ -59,7 +59,8 @@ class CalibrationProfile:
 class DetectionMetrics:
     side: str
     values: dict[str, float]
-    points: dict[str, tuple[float, float]]
+    confidence: dict[str, float] = field(default_factory=dict)
+    points: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
 @dataclass

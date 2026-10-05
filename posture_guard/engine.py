@@ -111,7 +111,10 @@ class PostureEngine:
             dt = 0.0
 
         posture_bad, bad_by_metric, severity = classify_posture(
-            self.profile, metrics, self.config.posture_min_bad_metrics
+            self.profile,
+            metrics,
+            self.config.posture_min_bad_metrics,
+            self.config.metric_min_confidence,
         )
         issue_type, issue_label, issue_guidance, issue_severity = dominant_issue(bad_by_metric, severity)
 

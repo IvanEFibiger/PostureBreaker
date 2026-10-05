@@ -57,6 +57,19 @@ class ConfigValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_config(self.path)
 
+    def test_metric_min_confidence_above_one_raises(self) -> None:
+        self._write({"metric_min_confidence": 1.5})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_metric_min_confidence_below_zero_raises(self) -> None:
+        self._write({"metric_min_confidence": -0.1})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_metric_min_confidence_default(self) -> None:
+        self.assertEqual(Config().metric_min_confidence, 0.60)
+
     def test_negative_duration_raises(self) -> None:
         self._write({"break_interval_minutes": -5})
         with self.assertRaises(ValueError):
