@@ -8,7 +8,7 @@ from .landmarks import BodyLandmarks
 from .metrics import field_confidence, mean_confidences
 from .models import ForwardState
 
-FORWARD_FIELDS = ("head_forward_ratio", "torso_forward_angle")
+FORWARD_FIELDS = ("head_forward_ratio", "head_depth_ratio", "torso_forward_angle")
 
 # Head-forward is only meaningful when the camera sees the head from the side.
 # A frontal (center) view hides the ear-shoulder offset, so the metric is absent.
@@ -51,6 +51,36 @@ def estimate_head_forward_ratio(
     return ((ear.x - shoulder.x) / width) * side_sign, confidence
 
 
+def estimate_head_depth_ratio(
+    body: BodyLandmarks,
+    min_visibility: float = 0.0,
+) -> tuple[float | None, float]:
+    """Apparent face scale relative to shoulder width, works frontal to the camera.
+
+    When the head moves towards the camera the face spans more pixels while the
+    shoulders barely change, so the ratio grows; a whole-body movement scales
+    both and keeps it stable. Observe-only: real validation must confirm it.
+    """
+    image = body.image
+    needed = ("left_eye", "right_eye", "left_shoulder", "right_shoulder")
+    if any(name not in image for name in needed):
+        return None, 0.0
+    left_eye = image["left_eye"]
+    right_eye = image["right_eye"]
+    left_shoulder = image["left_shoulder"]
+    right_shoulder = image["right_shoulder"]
+
+    eye_span = distance_2d(left_eye, right_eye)
+    shoulder_width = distance_2d(left_shoulder, right_shoulder)
+    if eye_span < EPSILON or shoulder_width < EPSILON:
+        return None, 0.0
+
+    confidence = visibility_confidence(left_eye, right_eye, left_shoulder, right_shoulder)
+    if confidence < max(min_visibility, EPSILON):
+        return None, 0.0
+    return eye_span / shoulder_width, confidence
+
+
 def estimate_torso_forward_angle(
     body: BodyLandmarks,
     side: str,
@@ -85,17 +115,21 @@ def estimate_forward_state(
     min_visibility: float = 0.0,
 ) -> ForwardState:
     head_forward, head_confidence = estimate_head_forward_ratio(body, side, orientation, min_visibility)
+    head_depth, depth_confidence = estimate_head_depth_ratio(body, min_visibility)
     torso_forward, torso_confidence = estimate_torso_forward_angle(body, side, min_visibility)
 
     confidences: dict[str, float] = {}
     if head_forward is not None:
         confidences["head_forward_ratio"] = head_confidence
+    if head_depth is not None:
+        confidences["head_depth_ratio"] = depth_confidence
     if torso_forward is not None:
         confidences["torso_forward_angle"] = torso_confidence
 
     present = list(confidences.values())
     return ForwardState(
         head_forward_ratio=head_forward,
+        head_depth_ratio=head_depth,
         torso_forward_angle=torso_forward,
         confidence=sum(present) / len(present) if present else 0.0,
         confidences=confidences,

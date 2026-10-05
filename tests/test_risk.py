@@ -125,10 +125,10 @@ class EvaluateV2IssuesTests(unittest.TestCase):
         evaluation = evaluate_v2_issues(observations, {"head_yaw": baseline()}, {}, Config())
         self.assertEqual(evaluation.risk_score, 0.0)
 
-    def test_global_scope_uses_global_baselines(self) -> None:
+    def test_neck_roll_delta_is_observe_only(self) -> None:
         observations = {"neck_roll_delta": MetricObservation(20.0, 1.0)}
         evaluation = evaluate_v2_issues(observations, {}, {"neck_roll_delta": baseline()}, Config())
-        self.assertGreater(evaluation.risk_score, 0.0)
+        self.assertEqual(evaluation.risk_score, 0.0)
 
     def test_noise_floor_suppresses_tiny_deviations(self) -> None:
         observations = {"head_forward_ratio": MetricObservation(0.10, 1.0)}
@@ -141,22 +141,26 @@ class EvaluateV2IssuesTests(unittest.TestCase):
         self.assertEqual(evaluate_v2_issues(observations, baselines, {}, Config(metric_min_confidence=0.7)).risk_score, 0.0)
         self.assertGreater(evaluate_v2_issues(observations, baselines, {}, Config(metric_min_confidence=0.6)).risk_score, 0.0)
 
-    def test_correlated_metrics_do_not_inflate_risk(self) -> None:
-        correlated = {
+    def test_shoulder_sides_collapse_to_one_issue(self) -> None:
+        sides = {
             "left_shoulder_elevation": MetricObservation(-0.5, 1.0),
             "right_shoulder_elevation": MetricObservation(-0.5, 1.0),
-            "shoulder_elevation": MetricObservation(-0.5, 1.0),
         }
-        baselines = {name: baseline() for name in correlated}
-        evaluation = evaluate_v2_issues(correlated, baselines, {}, Config())
+        baselines = {name: baseline() for name in sides}
+        evaluation = evaluate_v2_issues(sides, baselines, {}, Config())
         single = evaluate_v2_issues(
-            {"shoulder_elevation": MetricObservation(-0.5, 1.0)},
-            {"shoulder_elevation": baseline()},
+            {"left_shoulder_elevation": MetricObservation(-0.5, 1.0)},
+            {"left_shoulder_elevation": baseline()},
             {},
             Config(),
         )
         self.assertAlmostEqual(evaluation.risk_score, single.risk_score)
         self.assertAlmostEqual(evaluation.dominant_severity, single.dominant_severity)
+
+    def test_aggregate_shoulder_elevation_contributes_no_risk(self) -> None:
+        observations = {"shoulder_elevation": MetricObservation(-0.5, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"shoulder_elevation": baseline()}, {}, Config())
+        self.assertEqual(evaluation.risk_score, 0.0)
 
 
 if __name__ == "__main__":

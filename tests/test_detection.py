@@ -302,6 +302,27 @@ class ExtractMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(metrics.confidence["nose_shoulder_dx"], 0.65)
         self.assertAlmostEqual(metrics.confidence["ear_shoulder_dx"], 0.9)
 
+    def test_desk_detector_works_without_hips(self) -> None:
+        landmarks = make_landmarks()
+        landmarks[0] = _Landmark(0.5, 0.52)  # nose
+        landmarks[2] = _Landmark(0.45, 0.5)  # left_eye
+        landmarks[5] = _Landmark(0.55, 0.5)  # right_eye
+        landmarks[11] = _Landmark(0.4, 0.6)  # left_shoulder
+        landmarks[12] = _Landmark(0.6, 0.6)  # right_shoulder
+        landmarks[23].visibility = 0.1  # left_hip below the desk
+        landmarks[24].visibility = 0.1  # right_hip below the desk
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics)
+        # Full-body optional signals disappear without the hips...
+        self.assertIsNone(metrics.view.torso_lateral_lean)
+        self.assertIsNone(metrics.forward.torso_forward_angle)
+        self.assertNotIn("torso_lateral_lean", metrics.observations)
+        self.assertNotIn("torso_forward_angle", metrics.observations)
+        # ...but the desk-core battery keeps working.
+        self.assertIn("head_roll", metrics.observations)
+        self.assertIn("shoulder_roll", metrics.observations)
+        self.assertIn("head_depth_ratio", metrics.observations)
+
     def test_view_state_is_attached(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
         self.assertIsNotNone(metrics.view)

@@ -7,12 +7,17 @@ from pathlib import Path
 
 from posture_guard.dataset import (
     compare_to_baseline,
+    compare_to_view_baselines,
     flatten_snapshot,
     format_comparison,
+    format_response_matrix,
     format_summary,
+    format_view_comparison,
     load_snapshots,
+    metric_response_matrix,
     separability,
     snapshot_view,
+    split_label,
     summarize_snapshots,
 )
 
@@ -50,13 +55,14 @@ class FlattenSnapshotTests(unittest.TestCase):
             confidence={"ear_shoulder_dx": 0.8},
             view={"head_yaw": 0.3, "torso_yaw": None, "confidence": 0.9},
             shoulders={"roll": 2.0, "elevation": 0.33, "confidence": 0.7},
-            forward={"torso_forward_angle": 6.0, "confidence": 0.6},
+            forward={"head_depth_ratio": 0.5, "torso_forward_angle": 6.0, "confidence": 0.6},
         )
         signals = flatten_snapshot(payload)
         self.assertAlmostEqual(signals["ear_shoulder_dx"][0], 0.05)
         self.assertAlmostEqual(signals["head_yaw"][0], 0.3)
         self.assertAlmostEqual(signals["shoulder_roll"][0], 2.0)
         self.assertAlmostEqual(signals["shoulder_elevation"][0], 0.33)
+        self.assertAlmostEqual(signals["head_depth_ratio"][0], 0.5)
         self.assertAlmostEqual(signals["torso_forward_angle"][0], 6.0)
         self.assertNotIn("torso_yaw", signals)
 
@@ -173,6 +179,85 @@ class BaselineComparisonTests(unittest.TestCase):
         )
         comparison = compare_to_baseline(summary, "base")
         self.assertNotIn("base", comparison)
+
+
+def view_snapshot(label: str, view_name: str, value: float) -> dict[str, object]:
+    return snapshot(
+        label,
+        metrics={"m": value},
+        active_view={"id": view_name, "name": view_name},
+    )
+
+
+class ViewBaselineComparisonTests(unittest.TestCase):
+    def test_split_label(self) -> None:
+        self.assertEqual(split_label("head_forward @ Monitor 1"), ("head_forward", "Monitor 1"))
+        self.assertEqual(split_label("good"), ("good", ""))
+
+    def test_each_scenario_uses_its_own_view_baseline(self) -> None:
+        rows = [
+            view_snapshot("good", "Monitor 1", 1.0),
+            view_snapshot("head_forward", "Monitor 1", 3.0),
+            view_snapshot("good", "Monitor 2", 2.0),
+            view_snapshot("head_forward", "Monitor 2", 5.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        comparison = compare_to_view_baselines(summary)
+
+        monitor1 = comparison["head_forward @ Monitor 1"]
+        self.assertEqual(monitor1.baseline_label, "good @ Monitor 1")
+        self.assertAlmostEqual(monitor1.metrics["m"]["delta"], 2.0)
+
+        monitor2 = comparison["head_forward @ Monitor 2"]
+        self.assertEqual(monitor2.baseline_label, "good @ Monitor 2")
+        self.assertAlmostEqual(monitor2.metrics["m"]["delta"], 3.0)
+
+    def test_missing_view_baseline_is_not_crossed(self) -> None:
+        rows = [
+            view_snapshot("head_forward", "Monitor 1", 3.0),
+            view_snapshot("good", "Monitor 2", 2.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        self.assertEqual(compare_to_view_baselines(summary), {})
+
+    def test_baseline_scenario_is_excluded(self) -> None:
+        rows = [
+            view_snapshot("good", "Monitor 1", 1.0),
+            view_snapshot("head_forward", "Monitor 1", 3.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        comparison = compare_to_view_baselines(summary)
+        self.assertNotIn("good @ Monitor 1", comparison)
+
+    def test_custom_baseline_scenario(self) -> None:
+        rows = [
+            view_snapshot("front_good", "Monitor 2", 1.0),
+            view_snapshot("head_forward", "Monitor 2", 2.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        comparison = compare_to_view_baselines(summary, baseline_scenario="front_good")
+        self.assertIn("head_forward @ Monitor 2", comparison)
+        self.assertEqual(comparison["head_forward @ Monitor 2"].baseline_label, "front_good @ Monitor 2")
+
+    def test_format_view_comparison_names_both_labels(self) -> None:
+        rows = [
+            view_snapshot("good", "Monitor 1", 1.0),
+            view_snapshot("head_forward", "Monitor 1", 3.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        text = format_view_comparison(compare_to_view_baselines(summary))
+        self.assertIn("head_forward @ Monitor 1 vs good @ Monitor 1", text)
+
+    def test_response_matrix_groups_effects_by_metric(self) -> None:
+        rows = [
+            view_snapshot("good", "Monitor 1", 1.0),
+            view_snapshot("head_forward", "Monitor 1", 3.0),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        matrix = metric_response_matrix(compare_to_view_baselines(summary))
+        self.assertIn("head_forward @ Monitor 1", matrix["m"])
+        self.assertGreater(matrix["m"]["head_forward @ Monitor 1"], 0.0)
+        self.assertIn("effect", format_response_matrix(matrix))
 
 
 class SnapshotRoundTripTests(unittest.TestCase):

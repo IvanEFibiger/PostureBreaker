@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from posture_guard.debug import (
+    FULL_BODY_SNAPSHOT_LABELS,
     SNAPSHOT_LABELS,
     STATE_LOW,
     STATE_MISSING,
@@ -37,7 +38,9 @@ def make_metrics() -> DetectionMetrics:
             confidence=0.92,
         ),
         shoulders=ShoulderState(roll=1.8, left_elevation=0.32, right_elevation=0.30, elevation=0.32, confidence=0.88),
-        forward=ForwardState(head_forward_ratio=0.21, torso_forward_angle=6.5, confidence=0.85),
+        forward=ForwardState(
+            head_forward_ratio=0.21, head_depth_ratio=0.42, torso_forward_angle=6.5, confidence=0.85
+        ),
         observations={"head_yaw": MetricObservation(0.31, 0.92)},
     )
 
@@ -51,6 +54,11 @@ class SnapshotLabelTests(unittest.TestCase):
         self.assertIn("head_forward", SNAPSHOT_LABELS)
         self.assertIn("head_torso_turn", SNAPSHOT_LABELS)
         self.assertFalse(any("monitor" in label for label in SNAPSHOT_LABELS))
+
+    def test_desk_protocol_excludes_hip_scenarios(self) -> None:
+        for label in ("torso_forward", "torso_lean_left", "torso_lean_right"):
+            self.assertNotIn(label, SNAPSHOT_LABELS)
+            self.assertIn(label, FULL_BODY_SNAPSHOT_LABELS)
 
     def test_digit_keys_map_to_first_ten(self) -> None:
         self.assertEqual(label_for_digit("1"), SNAPSHOT_LABELS[0])
@@ -89,6 +97,7 @@ class FormatDebugLinesTests(unittest.TestCase):
             self.assertIn(section, text)
         self.assertIn("right", lines[0])
         self.assertIn("92%", lines[0])
+        self.assertIn("depth", text)
 
     def test_missing_and_low_signals_are_marked(self) -> None:
         metrics = make_metrics()
@@ -110,9 +119,15 @@ class BuildSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["side"], "right")
         self.assertAlmostEqual(snapshot["view"]["torso_yaw"], 0.07)
         self.assertAlmostEqual(snapshot["shoulders"]["elevation"], 0.32)
+        self.assertAlmostEqual(snapshot["forward"]["head_depth_ratio"], 0.42)
         self.assertAlmostEqual(snapshot["forward"]["torso_forward_angle"], 6.5)
         self.assertAlmostEqual(snapshot["observations"]["head_yaw"]["value"], 0.31)
         self.assertAlmostEqual(snapshot["metrics"]["ear_shoulder_dx"], 0.05)
+
+    def test_run_id_is_optional_and_recorded(self) -> None:
+        self.assertIsNone(build_snapshot(make_metrics(), "good")["run_id"])
+        tagged = build_snapshot(make_metrics(), "good", run_id="good_B")
+        self.assertEqual(tagged["run_id"], "good_B")
 
     def test_records_active_view_automatically(self) -> None:
         snapshot = build_snapshot(make_metrics(), "good", active_view_id="view_1", active_view_name="Monitor 1")

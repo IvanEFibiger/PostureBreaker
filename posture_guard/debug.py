@@ -17,21 +17,29 @@ _STATE_SYMBOLS = {STATE_OK: "ok", STATE_LOW: "?", STATE_MISSING: "--"}
 # Scenario labels only: the camera is fixed and which monitor you look at is
 # INFERRED from the recorded orientation (head_yaw), never labeled by hand.
 # Number keys 1-9,0 jump to the first ten; "n"/"p" cycle through the rest.
+#
+# DESK-CORE protocol: only scenarios observable with head, shoulders and upper
+# torso in frame. Scenarios that need the hips live in FULL_BODY_SNAPSHOT_LABELS
+# and are not part of the normal desk validation flow.
 SNAPSHOT_LABELS: tuple[str, ...] = (
     "good",
-    "front_good",
     "head_forward",
-    "torso_forward",
     "head_down",
     "head_tilt_left",
     "head_tilt_right",
-    "torso_lean_left",
-    "torso_lean_right",
     "shoulders_up",
     "shoulder_left_up",
     "shoulder_right_up",
     "head_turn_only",
     "head_torso_turn",
+)
+
+# Secondary, full-body-only scenarios: physically require the hips on screen, so
+# they are excluded from the desk protocol (kept for optional full-body runs).
+FULL_BODY_SNAPSHOT_LABELS: tuple[str, ...] = (
+    "torso_forward",
+    "torso_lean_left",
+    "torso_lean_right",
 )
 
 
@@ -108,6 +116,7 @@ def format_debug_lines(metrics: DetectionMetrics | None, min_confidence: float =
     lines.append(_format_line("elev", shoulder_value("elevation"), shoulder_confidence, min_confidence))
     lines.append("FORWARD")
     lines.append(_format_line("head", forward_value("head_forward_ratio"), forward_confidence, min_confidence))
+    lines.append(_format_line("depth", forward_value("head_depth_ratio"), forward_confidence, min_confidence))
     lines.append(_format_line("torso", forward_value("torso_forward_angle"), forward_confidence, min_confidence))
     return lines
 
@@ -144,6 +153,7 @@ def _forward_payload(forward: ForwardState | None) -> dict[str, Any] | None:
         return None
     return {
         "head_forward_ratio": forward.head_forward_ratio,
+        "head_depth_ratio": forward.head_depth_ratio,
         "torso_forward_angle": forward.torso_forward_angle,
         "confidence": forward.confidence,
     }
@@ -164,16 +174,20 @@ def build_snapshot(
     timestamp: dt.datetime | None = None,
     active_view_id: str | None = None,
     active_view_name: str | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Privacy-friendly metric snapshot: no image, only geometry and label.
 
     The monitor/view is not part of the label: it is recorded automatically from
     the detected orientation and (when calibrated) the active view profile.
+    ``run_id`` optionally tags a capture session so repeatability can be analyzed
+    without polluting the scenario label (e.g. two good baselines A and B).
     """
     moment = timestamp or dt.datetime.now()
     return {
         "timestamp": moment.isoformat(timespec="seconds"),
         "label": label,
+        "run_id": run_id,
         "side": metrics.side if metrics else None,
         "active_view": {"id": active_view_id, "name": active_view_name},
         "view": _view_payload(metrics.view if metrics else None),

@@ -27,6 +27,7 @@ V2_METRIC_NAMES = (
     "right_shoulder_elevation",
     "shoulder_elevation",
     "head_forward_ratio",
+    "head_depth_ratio",
     "torso_forward_angle",
 )
 
@@ -64,9 +65,10 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "head_roll": MetricSpec(PostureIssue.HEAD_TILT, CalibrationScope.VIEW, DeviationMode.TWO_SIDED, 0.8),
     "torso_lateral_lean": MetricSpec(None, CalibrationScope.VIEW, DeviationMode.TWO_SIDED),
     "shoulder_roll": MetricSpec(PostureIssue.SHOULDER_ASYMMETRY, CalibrationScope.VIEW, DeviationMode.TWO_SIDED, 0.7),
-    "shoulder_elevation": MetricSpec(
-        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
-    ),
+    # The aggregate shoulder elevation switches the side it reports between
+    # frames (max confidence), so it is diagnostic only: the productive signal
+    # is left/right elevation, which share SHOULDER_ELEVATION and combine via max.
+    "shoulder_elevation": MetricSpec(None, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1),
     "left_shoulder_elevation": MetricSpec(
         PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
@@ -74,12 +76,55 @@ METRIC_SPECS: dict[str, MetricSpec] = {
         PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
     "head_forward_ratio": MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5),
+    # Face-scale vs shoulder-width ratio: works frontal to a fixed desk camera.
+    # Observe-only until real data shows its specificity; maps to HEAD_FORWARD.
+    "head_depth_ratio": MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5),
     "torso_forward_angle": MetricSpec(
         PostureIssue.TORSO_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.2
     ),
-    # Body-relative relations: calibrated globally so switching monitor cannot hide them.
-    "neck_roll_delta": MetricSpec(PostureIssue.HEAD_TILT, CalibrationScope.GLOBAL, DeviationMode.TWO_SIDED, 0.8),
+    # Body-relative relation, diagnostic only: without the hips, shoulder_roll
+    # mixes trunk lean with shoulder asymmetry, so it must not stand in for a
+    # cervical tilt. Kept as a global baseline for debug/analysis.
+    "neck_roll_delta": MetricSpec(None, CalibrationScope.GLOBAL, DeviationMode.TWO_SIDED, 0.8),
 }
+
+
+class MetricGroup(StrEnum):
+    """Hardware framing a signal is meaningful under.
+
+    ``DESK_CORE`` works with a fixed desk camera that sees head, shoulders and
+    upper torso. ``FULL_BODY_OPTIONAL`` needs the hips and must stay absent (not
+    "failed coverage") when they are below the desk. ``DIAGNOSTIC`` is recorded
+    but never feeds the productive risk.
+    """
+
+    DESK_CORE = "desk_core"
+    FULL_BODY_OPTIONAL = "full_body_optional"
+    DIAGNOSTIC = "diagnostic"
+
+
+DESK_CORE_METRICS = frozenset(
+    {
+        "head_yaw",
+        "head_pitch",
+        "head_roll",
+        "torso_yaw",
+        "shoulder_roll",
+        "left_shoulder_elevation",
+        "right_shoulder_elevation",
+        "head_forward_ratio",
+        "head_depth_ratio",
+    }
+)
+FULL_BODY_OPTIONAL_METRICS = frozenset({"torso_lateral_lean", "torso_forward_angle"})
+
+
+def metric_group(metric_name: str) -> MetricGroup:
+    if metric_name in DESK_CORE_METRICS:
+        return MetricGroup.DESK_CORE
+    if metric_name in FULL_BODY_OPTIONAL_METRICS:
+        return MetricGroup.FULL_BODY_OPTIONAL
+    return MetricGroup.DIAGNOSTIC
 
 
 def spec_for(metric_name: str) -> MetricSpec | None:
@@ -156,6 +201,7 @@ def build_observations(
     if forward is not None:
         for name, value in (
             ("head_forward_ratio", forward.head_forward_ratio),
+            ("head_depth_ratio", forward.head_depth_ratio),
             ("torso_forward_angle", forward.torso_forward_angle),
         ):
             if value is not None:

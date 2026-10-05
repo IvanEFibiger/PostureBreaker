@@ -46,6 +46,7 @@ class Config:
             "head_pitch": 0.080,
             "head_roll": 5.0,
             "head_forward_ratio": 0.080,
+            "head_depth_ratio": 0.030,
             "torso_forward_angle": 5.0,
             "torso_lateral_lean": 5.0,
             "shoulder_roll": 3.0,
@@ -58,6 +59,7 @@ class Config:
         default_factory=lambda: {
             "neck_yaw_delta": 1.2,
             "head_forward_ratio": 1.5,
+            "head_depth_ratio": 1.5,
             "head_pitch": 1.0,
             "neck_roll_delta": 0.8,
             "shoulder_elevation": 1.1,

@@ -212,6 +212,7 @@ class ShoulderState:
 @dataclass
 class ForwardState:
     head_forward_ratio: float | None = None
+    head_depth_ratio: float | None = None
     torso_forward_angle: float | None = None
 
     confidence: float = 0.0

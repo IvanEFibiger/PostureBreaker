@@ -5,12 +5,15 @@ import unittest
 from posture_guard.config import Config
 from posture_guard.issues import PostureIssue
 from posture_guard.metrics import (
+    FULL_BODY_OPTIONAL_METRICS,
     METRIC_SPECS,
     CalibrationScope,
     DeviationMode,
+    MetricGroup,
     MetricSpec,
     build_metric_baselines,
     build_observations,
+    metric_group,
     min_confidence_for,
     normalize_observation,
     resolve_baseline,
@@ -118,16 +121,53 @@ class MetricSpecTests(unittest.TestCase):
         self.assertIsNone(spec_for("head_yaw").issue)
         self.assertEqual(spec_for("head_yaw").calibration_scope, CalibrationScope.NONE)
 
-    def test_neck_roll_delta_is_global(self) -> None:
-        self.assertEqual(spec_for("neck_roll_delta").calibration_scope, CalibrationScope.GLOBAL)
+    def test_neck_roll_delta_is_diagnostic_only(self) -> None:
+        spec = spec_for("neck_roll_delta")
+        self.assertEqual(spec.calibration_scope, CalibrationScope.GLOBAL)
+        self.assertIsNone(spec.issue)
 
-    def test_shoulder_elevation_is_lower_is_worse(self) -> None:
-        for name in ("shoulder_elevation", "left_shoulder_elevation", "right_shoulder_elevation"):
-            self.assertEqual(spec_for(name).deviation_mode, DeviationMode.LOWER_IS_WORSE)
+    def test_aggregate_shoulder_elevation_is_diagnostic_only(self) -> None:
+        self.assertIsNone(spec_for("shoulder_elevation").issue)
+
+    def test_shoulder_elevation_sides_are_productive(self) -> None:
+        for name in ("left_shoulder_elevation", "right_shoulder_elevation"):
+            spec = spec_for(name)
+            self.assertEqual(spec.issue, PostureIssue.SHOULDER_ELEVATION)
+            self.assertEqual(spec.deviation_mode, DeviationMode.LOWER_IS_WORSE)
+
+    def test_head_depth_ratio_is_view_scoped_head_forward(self) -> None:
+        spec = spec_for("head_depth_ratio")
+        self.assertEqual(spec.issue, PostureIssue.HEAD_FORWARD)
+        self.assertEqual(spec.calibration_scope, CalibrationScope.VIEW)
+        self.assertEqual(spec.deviation_mode, DeviationMode.HIGHER_IS_WORSE)
 
     def test_every_spec_name_is_known(self) -> None:
         for name in METRIC_SPECS:
             self.assertIsNotNone(spec_for(name))
+
+
+class MetricGroupTests(unittest.TestCase):
+    def test_desk_core_signals(self) -> None:
+        for name in (
+            "head_yaw",
+            "head_pitch",
+            "head_roll",
+            "torso_yaw",
+            "shoulder_roll",
+            "left_shoulder_elevation",
+            "right_shoulder_elevation",
+            "head_forward_ratio",
+            "head_depth_ratio",
+        ):
+            self.assertEqual(metric_group(name), MetricGroup.DESK_CORE)
+
+    def test_full_body_signals(self) -> None:
+        for name in FULL_BODY_OPTIONAL_METRICS:
+            self.assertEqual(metric_group(name), MetricGroup.FULL_BODY_OPTIONAL)
+
+    def test_diagnostics_are_not_productive_groups(self) -> None:
+        for name in ("neck_roll_delta", "shoulder_elevation"):
+            self.assertEqual(metric_group(name), MetricGroup.DIAGNOSTIC)
 
 
 class BuildObservationsTests(unittest.TestCase):
@@ -135,12 +175,13 @@ class BuildObservationsTests(unittest.TestCase):
         observations = build_observations(
             ViewState(head_yaw=0.3, head_pitch=0.1, torso_yaw=None, confidence=0.9),
             ShoulderState(roll=2.0, elevation=0.3, confidence=0.8),
-            ForwardState(head_forward_ratio=0.2, torso_forward_angle=6.0, confidence=0.7),
+            ForwardState(head_forward_ratio=0.2, head_depth_ratio=0.4, torso_forward_angle=6.0, confidence=0.7),
         )
         self.assertAlmostEqual(observations["head_yaw"].value, 0.3)
         self.assertAlmostEqual(observations["head_yaw"].confidence, 0.9)
         self.assertAlmostEqual(observations["shoulder_roll"].value, 2.0)
         self.assertAlmostEqual(observations["shoulder_elevation"].value, 0.3)
+        self.assertAlmostEqual(observations["head_depth_ratio"].value, 0.4)
         self.assertAlmostEqual(observations["torso_forward_angle"].value, 6.0)
         self.assertNotIn("torso_yaw", observations)
 

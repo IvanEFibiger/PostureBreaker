@@ -21,7 +21,7 @@ SHOULDER_METRICS = {
     "right_elevation": "right_shoulder_elevation",
     "elevation": "shoulder_elevation",
 }
-FORWARD_METRICS = ("head_forward_ratio", "torso_forward_angle")
+FORWARD_METRICS = ("head_forward_ratio", "head_depth_ratio", "torso_forward_angle")
 
 _SEPARABILITY_FLOOR = 1e-6
 
@@ -207,5 +207,97 @@ def format_comparison(comparison: dict[str, dict[str, dict[str, float]]]) -> str
                 f"  {name:<24} delta {row['delta']:+.3f}  effect {row['effect']:+.2f}  "
                 f"cov {row['coverage']:.0%}  conf {row['confidence']:.0%}"
             )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+@dataclass(frozen=True)
+class ViewBaselineComparison:
+    """A scenario compared against the ``good`` baseline of its OWN view."""
+
+    baseline_label: str
+    metrics: dict[str, dict[str, float]]
+
+
+def split_label(label: str) -> tuple[str, str]:
+    """Split a composite ``"scenario @ view"`` label; view is "" when absent."""
+    scenario, separator, view = label.partition(" @ ")
+    if not separator:
+        return label, ""
+    return scenario, view
+
+
+def compare_to_view_baselines(
+    summary: dict[str, dict[str, MetricStats]],
+    baseline_scenario: str = "good",
+) -> dict[str, ViewBaselineComparison]:
+    """Compare each scenario against the baseline scenario of its SAME view.
+
+    Looking at a different monitor is a different camera-relative orientation, so
+    crossing views (``head_forward @ Monitor 1`` vs ``good @ Monitor 2``) is
+    conceptually wrong. When a view has no baseline the scenario is simply
+    omitted: another view's baseline is never used as a fallback.
+    """
+    comparison: dict[str, ViewBaselineComparison] = {}
+    for label, stats in summary.items():
+        scenario, view = split_label(label)
+        if scenario == baseline_scenario:
+            continue
+        baseline_label = f"{baseline_scenario} @ {view}" if view else baseline_scenario
+        baseline = summary.get(baseline_label)
+        if baseline is None:
+            continue
+
+        rows: dict[str, dict[str, float]] = {}
+        for name, metric in stats.items():
+            base = baseline.get(name)
+            if base is None:
+                continue
+            delta = metric.median - base.median
+            rows[name] = {
+                "delta": delta,
+                "effect": delta / max(base.mad, _SEPARABILITY_FLOOR),
+                "coverage": metric.coverage,
+                "confidence": metric.confidence,
+            }
+        comparison[label] = ViewBaselineComparison(baseline_label, rows)
+    return comparison
+
+
+def format_view_comparison(comparison: dict[str, ViewBaselineComparison]) -> str:
+    lines: list[str] = []
+    for label in sorted(comparison):
+        entry = comparison[label]
+        lines.append(f"[{label} vs {entry.baseline_label}]")
+        for name, row in sorted(entry.metrics.items()):
+            lines.append(
+                f"  {name:<24} delta {row['delta']:+.3f}  effect {row['effect']:+.2f}  "
+                f"cov {row['coverage']:.0%}  conf {row['confidence']:.0%}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def metric_response_matrix(
+    comparison: dict[str, ViewBaselineComparison],
+) -> dict[str, dict[str, float]]:
+    """Effect of every scenario on every metric, per metric (cross-talk view).
+
+    A metric that reacts to many unrelated scenarios is not specific enough,
+    even if its raw separability is high.
+    """
+    matrix: dict[str, dict[str, float]] = {}
+    for label, entry in comparison.items():
+        for name, row in entry.metrics.items():
+            matrix.setdefault(name, {})[label] = row["effect"]
+    return matrix
+
+
+def format_response_matrix(matrix: dict[str, dict[str, float]]) -> str:
+    lines: list[str] = []
+    for name in sorted(matrix):
+        lines.append(f"{name}:")
+        for label in sorted(matrix[name]):
+            lines.append(f"  {label:<28} {matrix[name][label]:+.2f} effect")
         lines.append("")
     return "\n".join(lines).rstrip()

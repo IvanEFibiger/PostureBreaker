@@ -5,6 +5,7 @@ import unittest
 from posture_guard.forward import (
     aggregate_forward,
     estimate_forward_state,
+    estimate_head_depth_ratio,
     estimate_head_forward_ratio,
     estimate_torso_forward_angle,
 )
@@ -109,6 +110,59 @@ class TorsoForwardAngleTests(unittest.TestCase):
         )
 
 
+def depth_body(eye_span: float, shoulder_width: float, visibility: float = 0.9) -> dict[str, Point2D]:
+    half_eye = eye_span / 2.0
+    half_shoulder = shoulder_width / 2.0
+    return {
+        "left_eye": p(0.5 - half_eye, 0.3, visibility),
+        "right_eye": p(0.5 + half_eye, 0.3, visibility),
+        "left_shoulder": p(0.5 - half_shoulder, 0.5, visibility),
+        "right_shoulder": p(0.5 + half_shoulder, 0.5, visibility),
+    }
+
+
+class HeadDepthRatioTests(unittest.TestCase):
+    def test_face_and_shoulders_scaling_together_keeps_ratio(self) -> None:
+        near, _ = estimate_head_depth_ratio(body(depth_body(0.1, 0.2)))
+        closer, _ = estimate_head_depth_ratio(body(depth_body(0.2, 0.4)))
+        self.assertAlmostEqual(near, closer)
+
+    def test_face_scaling_more_than_shoulders_raises_ratio(self) -> None:
+        baseline_ratio, _ = estimate_head_depth_ratio(body(depth_body(0.1, 0.2)))
+        forward_ratio, _ = estimate_head_depth_ratio(body(depth_body(0.2, 0.2)))
+        self.assertGreater(forward_ratio, baseline_ratio)
+
+    def test_ratio_value_and_confidence(self) -> None:
+        value, confidence = estimate_head_depth_ratio(body(depth_body(0.1, 0.2)))
+        self.assertAlmostEqual(value, 0.5)
+        self.assertAlmostEqual(confidence, 0.9)
+
+    def test_confidence_is_the_minimum_of_used_landmarks(self) -> None:
+        image = depth_body(0.1, 0.2)
+        image["left_eye"] = p(0.45, 0.3, visibility=0.4)
+        _, confidence = estimate_head_depth_ratio(body(image))
+        self.assertAlmostEqual(confidence, 0.4)
+
+    def test_missing_eyes_is_none(self) -> None:
+        image = depth_body(0.1, 0.2)
+        del image["left_eye"]
+        self.assertEqual(estimate_head_depth_ratio(body(image)), (None, 0.0))
+
+    def test_missing_shoulder_is_none(self) -> None:
+        image = depth_body(0.1, 0.2)
+        del image["right_shoulder"]
+        self.assertEqual(estimate_head_depth_ratio(body(image)), (None, 0.0))
+
+    def test_degenerate_shoulder_width_is_none(self) -> None:
+        image = depth_body(0.1, 0.2)
+        image["right_shoulder"] = p(0.4, 0.5)
+        self.assertEqual(estimate_head_depth_ratio(body(image)), (None, 0.0))
+
+    def test_low_visibility_is_none(self) -> None:
+        image = depth_body(0.1, 0.2, visibility=0.2)
+        self.assertEqual(estimate_head_depth_ratio(body(image), min_visibility=0.5), (None, 0.0))
+
+
 class EstimateForwardStateTests(unittest.TestCase):
     def test_lateral_view_publishes_both(self) -> None:
         state = estimate_forward_state(body(right_side()), "right", "right")
@@ -125,8 +179,14 @@ class EstimateForwardStateTests(unittest.TestCase):
     def test_missing_landmarks_leave_both_none(self) -> None:
         state = estimate_forward_state(body({}), "right", "right")
         self.assertIsNone(state.head_forward_ratio)
+        self.assertIsNone(state.head_depth_ratio)
         self.assertIsNone(state.torso_forward_angle)
         self.assertEqual(state.confidence, 0.0)
+
+    def test_publishes_depth_ratio_when_face_visible(self) -> None:
+        state = estimate_forward_state(body(depth_body(0.1, 0.2)), "right", "center")
+        self.assertAlmostEqual(state.head_depth_ratio, 0.5)
+        self.assertAlmostEqual(state.confidence, 0.9)
 
 
 class AggregateForwardTests(unittest.TestCase):
@@ -134,10 +194,11 @@ class AggregateForwardTests(unittest.TestCase):
         self.assertIsNone(aggregate_forward([None, None]))
 
     def test_averages_fields_and_preserves_none(self) -> None:
-        first = ForwardState(head_forward_ratio=0.2, torso_forward_angle=4.0, confidence=1.0)
-        second = ForwardState(head_forward_ratio=0.4, confidence=1.0)
+        first = ForwardState(head_forward_ratio=0.2, head_depth_ratio=0.3, torso_forward_angle=4.0, confidence=1.0)
+        second = ForwardState(head_forward_ratio=0.4, head_depth_ratio=0.5, confidence=1.0)
         merged = aggregate_forward([first, second])
         self.assertAlmostEqual(merged.head_forward_ratio, 0.3)
+        self.assertAlmostEqual(merged.head_depth_ratio, 0.4)
         self.assertAlmostEqual(merged.torso_forward_angle, 4.0)
         self.assertEqual(merged.confidence, 1.0)
 
