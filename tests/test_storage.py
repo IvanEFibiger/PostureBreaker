@@ -175,5 +175,40 @@ class HistoryMaintenanceTests(unittest.TestCase):
         self.assertEqual(payload["daily_stats"][0]["day"], dt.date.today().isoformat())
 
 
+class IssueAndViewTimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self._tmp.name) / "history" / "test.db"
+        self.store = AnalyticsStore(self.db_path)
+
+    def tearDown(self) -> None:
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        self._tmp.cleanup()
+
+    def test_issue_time_accumulates(self) -> None:
+        self.store.add_issue_time("neck_rotation", 12.0)
+        self.store.add_issue_time("neck_rotation", 8.0)
+        self.store.add_issue_time("head_forward", 5.0)
+        issues = self.store.issue_times_today()
+        self.assertEqual(issues[0], {"issue": "neck_rotation", "seconds": 20.0})
+        self.assertEqual(issues[1], {"issue": "head_forward", "seconds": 5.0})
+
+    def test_view_time_accumulates_and_keeps_name(self) -> None:
+        self.store.add_view_time("view_1", "Monitor 1", 20.0)
+        self.store.add_view_time("view_1", "Monitor 1", 10.0)
+        views = self.store.view_times_today()
+        self.assertEqual(views, [{"view_id": "view_1", "view_name": "Monitor 1", "seconds": 30.0}])
+
+    def test_empty_keys_are_ignored(self) -> None:
+        self.store.add_issue_time(None, 5.0)
+        self.store.add_view_time(None, "x", 5.0)
+        self.store.add_issue_time("head_forward", 0.0)
+        self.assertEqual(self.store.issue_times_today(), [])
+        self.assertEqual(self.store.view_times_today(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

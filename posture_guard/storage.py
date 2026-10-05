@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class AnalyticsStore:
@@ -36,11 +36,37 @@ class AnalyticsStore:
             version = self._schema_version()
             if version < 1:
                 self._apply_base_schema()
-                self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            if version < 2:
+                self._apply_analytics_v2_schema()
+            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self.conn.commit()
         except sqlite3.DatabaseError:
             self.conn.close()
             raise
+
+    def _apply_analytics_v2_schema(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS issue_time (
+                day TEXT NOT NULL,
+                issue TEXT NOT NULL,
+                seconds REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(day, issue)
+            );
+
+            CREATE TABLE IF NOT EXISTS view_time (
+                day TEXT NOT NULL,
+                view_id TEXT NOT NULL,
+                view_name TEXT NOT NULL DEFAULT '',
+                seconds REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(day, view_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_issue_time_day ON issue_time(day);
+            CREATE INDEX IF NOT EXISTS idx_view_time_day ON view_time(day);
+            """
+        )
+        self.conn.commit()
 
     def _apply_base_schema(self) -> None:
         self.conn.executescript(
@@ -291,6 +317,53 @@ class AnalyticsStore:
         key = "bad_posture_seconds" if is_bad else "good_posture_seconds"
         self._daily[key] += seconds
         self._hourly[self._current_hour()][key] += seconds
+
+    def add_issue_time(self, issue: str | None, seconds: float) -> None:
+        if not issue or seconds <= 0:
+            return
+        self._roll_day()
+        self.conn.execute(
+            """
+            INSERT INTO issue_time(day, issue, seconds) VALUES (?, ?, ?)
+            ON CONFLICT(day, issue) DO UPDATE SET seconds = seconds + excluded.seconds
+            """,
+            (self._today.isoformat(), str(issue), seconds),
+        )
+
+    def add_view_time(self, view_id: str | None, view_name: str, seconds: float) -> None:
+        if not view_id or seconds <= 0:
+            return
+        self._roll_day()
+        self.conn.execute(
+            """
+            INSERT INTO view_time(day, view_id, view_name, seconds) VALUES (?, ?, ?, ?)
+            ON CONFLICT(day, view_id) DO UPDATE SET
+                seconds = seconds + excluded.seconds,
+                view_name = excluded.view_name
+            """,
+            (self._today.isoformat(), str(view_id), str(view_name or ""), seconds),
+        )
+
+    def issue_times_today(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT issue, seconds FROM issue_time WHERE day = ? ORDER BY seconds DESC, issue ASC",
+            (self._today.isoformat(),),
+        ).fetchall()
+        return [{"issue": str(row["issue"]), "seconds": float(row["seconds"])} for row in rows]
+
+    def view_times_today(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT view_id, view_name, seconds FROM view_time WHERE day = ? ORDER BY seconds DESC, view_id ASC",
+            (self._today.isoformat(),),
+        ).fetchall()
+        return [
+            {
+                "view_id": str(row["view_id"]),
+                "view_name": str(row["view_name"]),
+                "seconds": float(row["seconds"]),
+            }
+            for row in rows
+        ]
 
     def record_sample(
         self,

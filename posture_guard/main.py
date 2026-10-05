@@ -592,6 +592,12 @@ def _camera_worker(
                     store.add_work_time(result.work_seconds_delta, focus_mode=result.focus_mode)
                 if result.count_posture_time:
                     store.add_posture_time(result.posture_seconds_delta, result.posture_bad)
+                    store.add_issue_time(result.dominant_issue, result.posture_seconds_delta)
+                    store.add_view_time(
+                        active_view_id,
+                        active_view.name if active_view else "",
+                        result.posture_seconds_delta,
+                    )
 
                 _handle_events(result, store, notifications, smoother, config)
 
@@ -718,6 +724,8 @@ def _camera_worker(
                         hourly_trend=store.hourly_trend(),
                         weekly_trend=store.weekly_trend(),
                         top_errors=store.top_errors(),
+                        issue_times_today=store.issue_times_today(),
+                        view_times_today=store.view_times_today(),
                     )
                     last_refresh_at = now_ts
 

@@ -8,6 +8,7 @@ from posture_guard.issues import (
     PostureIssue,
     issue_details,
     issue_for_metric,
+    issue_label_for,
     policy_for,
 )
 
@@ -39,6 +40,11 @@ class IssueMappingTests(unittest.TestCase):
 
     def test_issue_details_none_and_unknown(self) -> None:
         self.assertEqual(issue_details(None), ("", ""))
+
+    def test_issue_label_for_value(self) -> None:
+        self.assertEqual(issue_label_for("neck_rotation"), "Cuello girado")
+        self.assertEqual(issue_label_for("nope"), "")
+        self.assertEqual(issue_label_for(None), "")
 
 
 class IssuePolicyTests(unittest.TestCase):

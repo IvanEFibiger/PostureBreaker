@@ -102,5 +102,17 @@ def issue_details(issue: PostureIssue | None) -> tuple[str, str]:
     return payload
 
 
+def issue_label_for(value: str | None) -> str:
+    """Human label for an issue value string, or "" when it is unknown."""
+    if not value:
+        return ""
+    try:
+        issue = PostureIssue(value)
+    except ValueError:
+        return ""
+    label, _ = issue_details(issue)
+    return label
+
+
 def policy_for(issue: PostureIssue) -> IssuePolicy:
     return ISSUE_POLICIES.get(issue, IssuePolicy(threshold_seconds=30.0))

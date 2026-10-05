@@ -49,6 +49,8 @@ class SharedState:
     hourly_trend: list[dict[str, Any]] = field(default_factory=list)
     weekly_trend: list[dict[str, Any]] = field(default_factory=list)
     top_errors: list[dict[str, Any]] = field(default_factory=list)
+    issue_times_today: list[dict[str, Any]] = field(default_factory=list)
+    view_times_today: list[dict[str, Any]] = field(default_factory=list)
     available_cameras: list[int] = field(default_factory=list)
     camera_index: int = 0
     calibration_quality: float = 0.0

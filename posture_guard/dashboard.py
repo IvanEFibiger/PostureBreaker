@@ -5,6 +5,7 @@ from typing import Any
 import customtkinter as ctk
 
 from .detection import issue_details
+from .issues import issue_label_for
 from .state import SharedState
 
 BG_COLOR = "#FFF7F1"
@@ -315,16 +316,32 @@ class Dashboard(ctk.CTk):
         self._settings_hint.pack(anchor="w", padx=16, pady=(8, 4))
         ctk.CTkButton(settings, text="Aplicar ajustes", command=self._on_apply_settings, fg_color=ACCENT, hover_color="#EA580C", font=("Segoe UI", 12, "bold")).pack(fill="x", padx=16, pady=(0, 14))
 
-    def _format_error_list(self, top_errors: list[dict[str, Any]]) -> str:
-        if not top_errors:
-            return "Aun no hay alertas suficientes para sacar patrones."
-        lines = []
-        for item in top_errors:
-            label, _ = issue_details(str(item.get("error_type") or ""))
-            label = label or str(item.get("error_type") or "Postura inestable")
-            count = int(item.get("count", 0))
-            lines.append(f"{label}: {count}")
-        return "\n".join(lines)
+    def _format_analytics(self, snap: dict[str, Any]) -> str:
+        lines: list[str] = []
+
+        top_errors = list(snap.get("top_errors", []))
+        if top_errors:
+            lines.append("Mas repetidos (7 dias):")
+            for item in top_errors:
+                label, _ = issue_details(str(item.get("error_type") or ""))
+                label = label or str(item.get("error_type") or "Postura inestable")
+                lines.append(f"  {label}: {int(item.get('count', 0))}")
+
+        issue_times = list(snap.get("issue_times_today", []))
+        if issue_times:
+            lines.append("Tiempo por problema (hoy):")
+            for item in issue_times[:5]:
+                label = issue_label_for(str(item.get("issue") or "")) or str(item.get("issue") or "?")
+                lines.append(f"  {label}: {_format_short(float(item.get('seconds', 0.0)))}")
+
+        view_times = list(snap.get("view_times_today", []))
+        if view_times:
+            lines.append("Tiempo por vista (hoy):")
+            for item in view_times[:5]:
+                name = str(item.get("view_name") or item.get("view_id") or "?")
+                lines.append(f"  {name}: {_format_short(float(item.get('seconds', 0.0)))}")
+
+        return "\n".join(lines) if lines else "Aun no hay datos suficientes."
 
     def _add_slider(self, parent: Any, label: str, minimum: float, maximum: float, steps: int) -> Any:
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -400,7 +417,7 @@ class Dashboard(ctk.CTk):
 
         self._hour_chart.set_series("Hoy por hora", list(snap.get("hourly_trend", [])))
         self._week_chart.set_series("Ultimos 7 dias", list(snap.get("weekly_trend", [])))
-        self._errors_body.configure(text=self._format_error_list(list(snap.get("top_errors", []))))
+        self._errors_body.configure(text=self._format_analytics(snap))
 
         cameras = [str(index) for index in snap.get("available_cameras", [])]
         if cameras and list(self._camera_menu.cget("values")) != cameras:
