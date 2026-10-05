@@ -16,8 +16,19 @@ class BreakManager:
         self._away_streak = 0.0
         self._work_reset_done = False
 
-    def update(self, has_pose: bool, dt: float, now_ts: float) -> list[str]:
+    def update(
+        self,
+        has_pose: bool,
+        dt: float,
+        now_ts: float,
+        repeat_interval_seconds: float | None = None,
+    ) -> list[str]:
         events: list[str] = []
+        repeat_interval = (
+            self.config.break_repeat_alert_seconds
+            if repeat_interval_seconds is None
+            else repeat_interval_seconds
+        )
 
         if self.state.break_due:
             if has_pose:
@@ -26,7 +37,7 @@ class BreakManager:
                 self._work_reset_done = False
                 if self._back_streak >= self.RETURN_GRACE_SECONDS:
                     self.state.away_during_break = 0.0
-                    if now_ts - self.state.last_break_alert_at >= self.config.break_repeat_alert_seconds:
+                    if now_ts - self.state.last_break_alert_at >= repeat_interval:
                         self.state.last_break_alert_at = now_ts
                         events.append("break_alert_repeat")
             else:

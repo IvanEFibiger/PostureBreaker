@@ -55,6 +55,18 @@ class BreakManagerTests(unittest.TestCase):
         events = manager.update(has_pose=True, dt=5.0, now_ts=110.0)
         self.assertEqual(events, [])
 
+    def test_repeat_interval_override_is_respected(self) -> None:
+        manager, _ = make_manager()
+        manager.update(has_pose=True, dt=60.0, now_ts=100.0)
+        events = manager.update(has_pose=True, dt=5.0, now_ts=290.0, repeat_interval_seconds=180.0)
+        self.assertEqual(events, ["break_alert_repeat"])
+
+    def test_repeat_interval_override_blocks_early_repeat(self) -> None:
+        manager, _ = make_manager()
+        manager.update(has_pose=True, dt=60.0, now_ts=100.0)
+        events = manager.update(has_pose=True, dt=5.0, now_ts=200.0, repeat_interval_seconds=180.0)
+        self.assertEqual(events, [])
+
     def test_brief_visibility_does_not_complete_break(self) -> None:
         manager, state = make_manager()
         manager.update(has_pose=True, dt=60.0, now_ts=100.0)

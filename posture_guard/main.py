@@ -301,7 +301,10 @@ def _camera_worker(
                 alert_state.bad_posture_streak = 0.0
                 alert_state.posture_active = False
 
-            for event in break_manager.update(has_pose, dt_seconds, now_ts):
+            repeat_interval = (
+                config.focus_break_repeat_seconds if focus_mode else config.break_repeat_alert_seconds
+            )
+            for event in break_manager.update(has_pose, dt_seconds, now_ts, repeat_interval):
                 current_progress = alert_state.away_during_break / max(config.break_required_seconds, 1.0)
                 routine_title, routine_step, routine_rule = _break_payload(
                     True,
@@ -310,11 +313,7 @@ def _camera_worker(
                     alert_state.completed_breaks,
                 )
                 if event in {"break_alert", "break_alert_repeat"}:
-                    if event == "break_alert" or not focus_mode:
-                        notifications.break_alert(f"{routine_title}. {routine_step}")
-                    elif now_ts - alert_state.last_break_alert_at >= config.focus_break_repeat_seconds:
-                        notifications.break_alert(f"{routine_title}. {routine_step}")
-                        alert_state.last_break_alert_at = now_ts
+                    notifications.break_alert(f"{routine_title}. {routine_step}")
                     store.log_break_event(event, detail=f"{routine_title}: {routine_step}", focus_mode=focus_mode)
                 elif event == "break_completed":
                     notifications.break_completed()
