@@ -58,6 +58,20 @@ class SharedState:
     autostart_enabled: bool = False
     settings: dict[str, float] = field(default_factory=dict)
 
+    validation_active: bool = False
+    validation_phase: str = ""
+    validation_scenario: str = ""
+    validation_title: str = ""
+    validation_instruction: str = ""
+    validation_progress: float = 0.0
+    validation_remaining_seconds: float = 0.0
+    validation_scenario_index: int = 0
+    validation_scenario_count: int = 0
+    validation_sample_count: int = 0
+    validation_run_id: str = ""
+    validation_view_name: str = ""
+    validation_message: str = ""
+
     cmd_calibrate_good: bool = False
     cmd_calibrate_bad: bool = False
     cmd_calibrate_new_view: bool = False
@@ -72,6 +86,8 @@ class SharedState:
     cmd_diagnostics: bool = False
     cmd_snapshot: bool = False
     cmd_apply_settings: bool = False
+    cmd_start_validation: bool = False
+    cmd_cancel_validation: bool = False
     cmd_hide_window: bool = False
     cmd_show_window: bool = False
     cmd_quit: bool = False

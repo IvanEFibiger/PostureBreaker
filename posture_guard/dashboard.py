@@ -316,6 +316,79 @@ class Dashboard(ctk.CTk):
         self._settings_hint.pack(anchor="w", padx=16, pady=(8, 4))
         ctk.CTkButton(settings, text="Aplicar ajustes", command=self._on_apply_settings, fg_color=ACCENT, hover_color="#EA580C", font=("Segoe UI", 12, "bold")).pack(fill="x", padx=16, pady=(0, 14))
 
+        validation = ctk.CTkFrame(host, fg_color=CARD_COLOR, corner_radius=16)
+        validation.grid(row=15, column=0, sticky="ew", padx=24, pady=(0, 24))
+        ctk.CTkLabel(validation, text="Validacion detector V2", font=("Segoe UI", 12, "bold"), text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(14, 0))
+        self._validation_title = ctk.CTkLabel(validation, text="Validacion guiada (observe-only)", font=("Segoe UI", 18, "bold"), text_color=TEXT_PRIMARY)
+        self._validation_title.pack(anchor="w", padx=16, pady=(2, 0))
+        self._validation_body = ctk.CTkLabel(
+            validation,
+            text="Ejecuta una serie guiada de posturas y genera un dataset para evaluar las metricas.",
+            font=("Segoe UI", 12),
+            text_color=TEXT_SECONDARY,
+            wraplength=420,
+            justify="left",
+        )
+        self._validation_body.pack(anchor="w", padx=16, pady=(4, 8))
+        self._validation_bar = ctk.CTkProgressBar(validation, fg_color="#E5E7EB", progress_color=ACCENT)
+        self._validation_bar.pack(fill="x", padx=16, pady=(0, 8))
+        self._validation_bar.set(0)
+        self._validation_meta = ctk.CTkLabel(validation, text="", font=("Segoe UI", 11, "bold"), text_color=TEXT_PRIMARY, wraplength=420, justify="left")
+        self._validation_meta.pack(anchor="w", padx=16, pady=(0, 6))
+        self._btn_validation = ctk.CTkButton(validation, text="Ejecutar test V2", command=self._on_start_validation, fg_color=ACCENT, hover_color="#EA580C", font=("Segoe UI", 13, "bold"))
+        self._btn_validation.pack(fill="x", padx=16, pady=(0, 6))
+        self._btn_cancel_validation = ctk.CTkButton(validation, text="Cancelar validacion", command=self._on_cancel_validation, fg_color="#9CA3AF", hover_color="#6B7280", font=("Segoe UI", 12))
+
+    def _update_validation(self, snap: dict[str, Any]) -> None:
+        active = bool(snap.get("validation_active", False))
+        phase = str(snap.get("validation_phase", ""))
+        message = str(snap.get("validation_message", ""))
+        if active or phase in ("prepare", "capture"):
+            title = str(snap.get("validation_title", ""))
+            instruction = str(snap.get("validation_instruction", ""))
+            index = int(snap.get("validation_scenario_index", 0))
+            count = int(snap.get("validation_scenario_count", 0))
+            remaining = float(snap.get("validation_remaining_seconds", 0.0))
+            samples = int(snap.get("validation_sample_count", 0))
+            self._validation_title.configure(text=f"VALIDACION V2 - {index} / {count}")
+            if phase == "prepare":
+                body = f"{title}\n\n{instruction}\n\nPreparacion: comenzamos en {int(round(remaining))} s"
+            else:
+                body = f"{title}\n\nCAPTURANDO: {int(round(remaining))} s\n{samples} muestras"
+            self._validation_body.configure(text=body)
+            self._validation_bar.set(float(snap.get("validation_progress", 0.0)))
+            view_name = str(snap.get("validation_view_name", ""))
+            run_id = str(snap.get("validation_run_id", ""))
+            self._validation_meta.configure(text=f"Vista: {view_name} | run: {run_id} | {samples} muestras")
+            self._btn_validation.pack_forget()
+            self._btn_cancel_validation.pack(fill="x", padx=16, pady=(0, 14))
+            return
+
+        self._validation_title.configure(text="Validacion guiada (observe-only)")
+        self._validation_body.configure(
+            text=message or "Ejecuta una serie guiada de posturas y genera un dataset para evaluar las metricas."
+        )
+        self._validation_bar.set(0.0)
+        self._btn_cancel_validation.pack_forget()
+
+        calibrated = bool(snap.get("calibrated", False))
+        calibrating = bool(snap.get("calibrating_mode", ""))
+        status = str(snap.get("status", ""))
+        cameras = list(snap.get("available_cameras", []))
+        can_run = calibrated and not calibrating and bool(cameras) and status not in ("error", "camera_error")
+        if can_run:
+            self._validation_meta.configure(text="")
+        else:
+            if calibrating:
+                reason = "Calibracion en curso."
+            elif not calibrated:
+                reason = "Necesitas calibracion y una vista activa."
+            else:
+                reason = "Camara no disponible."
+            self._validation_meta.configure(text=reason)
+        self._btn_validation.configure(state="normal" if can_run else "disabled", text="Ejecutar test V2")
+        self._btn_validation.pack(fill="x", padx=16, pady=(0, 6))
+
     def _format_analytics(self, snap: dict[str, Any]) -> str:
         lines: list[str] = []
 
@@ -429,6 +502,7 @@ class Dashboard(ctk.CTk):
             hover_color="#115E59" if autostart_on else "#4B5563",
         )
         self._tools_hint.configure(text=str(snap.get("calibration_summary", "")))
+        self._update_validation(snap)
 
         settings = snap.get("settings") or {}
         if not self._settings_loaded and settings:
@@ -485,6 +559,12 @@ class Dashboard(ctk.CTk):
 
     def _on_diagnostics(self) -> None:
         self._shared.update(cmd_diagnostics=True)
+
+    def _on_start_validation(self) -> None:
+        self._shared.update(cmd_start_validation=True, validation_message="")
+
+    def _on_cancel_validation(self) -> None:
+        self._shared.update(cmd_cancel_validation=True)
 
     def _on_apply_settings(self) -> None:
         self._shared.update(

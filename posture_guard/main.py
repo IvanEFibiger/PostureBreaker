@@ -36,6 +36,13 @@ from .single_instance import SingleInstance
 from .state import SharedState
 from .storage import AnalyticsStore, open_store
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
+from .validation import (
+    ValidationPhase,
+    ValidationSession,
+    build_desk_scenarios,
+    make_run_id,
+    validation_overlay_lines,
+)
 from .views import ViewSelector
 
 logger = logging.getLogger(__name__)
@@ -288,6 +295,9 @@ def _camera_worker(
 ) -> None:
     store = None
     cap = None
+    # Guided validation is an isolated experimental session: it never writes to
+    # the analytics store and never drives engine policies/alerts.
+    validation: dict[str, ValidationSession | None] = {"session": None}
     try:
         calibration_set = _load_calibration_set(calibration_path, shared)
         active_view = calibration_set.active_profile() if calibration_set else None
@@ -394,6 +404,18 @@ def _camera_worker(
                 frame_started_at = time.monotonic()
                 ok, frame = cap.read()
                 if not ok:
+                    session = validation["session"]
+                    if session is not None:
+                        session.runner.cancel()
+                        session.close()
+                        smoother.clear()
+                        engine.reset_posture_state()
+                        validation["session"] = None
+                        shared.update(
+                            validation_active=False,
+                            validation_phase=ValidationPhase.CANCELLED.value,
+                            validation_message="Camara perdida; validacion cancelada.",
+                        )
                     cap = _reconnect_camera(cap, config, shared)
                     if cap is None:
                         shared.update(
@@ -433,25 +455,26 @@ def _camera_worker(
                         engine.set_profile(profile)
                         engine.set_baselines(active_view.metric_baselines, calibration_set.global_baselines)
                         engine.reset_posture_state()
-                        store.log_break_event(
-                            "view_changed",
-                            detail=f"Vista: {active_view.name}",
-                            focus_mode=engine.focus_mode,
-                        )
+                        if validation["session"] is None:
+                            store.log_break_event(
+                                "view_changed",
+                                detail=f"Vista: {active_view.name}",
+                                focus_mode=engine.focus_mode,
+                            )
                         shared.update(calibration_summary=f"Vista: {active_view.name}")
 
-                if shared.consume_command("cmd_calibrate_good"):
+                if shared.consume_command("cmd_calibrate_good") and validation["session"] is None:
                     calibrator.start("good")
                     notifications.generic()
-                if shared.consume_command("cmd_calibrate_new_view"):
+                if shared.consume_command("cmd_calibrate_new_view") and validation["session"] is None:
                     calibrator.start("good")
                     new_view_pending = True
                     notifications.generic()
-                if shared.consume_command("cmd_calibrate_bad"):
+                if shared.consume_command("cmd_calibrate_bad") and validation["session"] is None:
                     if profile:
                         calibrator.start("bad", expected_side=profile.side)
                         notifications.generic()
-                if shared.consume_command("cmd_clear_calibration"):
+                if shared.consume_command("cmd_clear_calibration") and validation["session"] is None:
                     calibration_set = None
                     active_view = None
                     active_view_id = None
@@ -551,6 +574,38 @@ def _camera_worker(
                         shared.update(calibration_summary="Ajustes invalidos; no se aplicaron.")
                     notifications.generic()
 
+                if shared.consume_command("cmd_cancel_validation"):
+                    if validation["session"] is not None:
+                        validation["session"].runner.cancel()
+
+                if shared.consume_command("cmd_start_validation"):
+                    if validation["session"] is not None:
+                        shared.update(validation_message="Ya hay una validacion en curso.")
+                    elif calibrator.is_running():
+                        shared.update(validation_message="No podes validar mientras calibra.")
+                    elif calibration_set is None or active_view is None:
+                        shared.update(validation_message="Necesitas calibracion y una vista activa para validar.")
+                    else:
+                        try:
+                            validation["session"] = ValidationSession.start(
+                                scenarios=build_desk_scenarios(
+                                    config.validation_prepare_seconds,
+                                    config.validation_capture_seconds,
+                                ),
+                                sample_interval_seconds=config.validation_sample_interval_seconds,
+                                run_id=make_run_id(dt.datetime.now()),
+                                test_view_id=active_view.id,
+                                test_view_name=active_view.name,
+                                directory=data_dir / "validation",
+                            )
+                            smoother.clear()
+                            engine.reset_posture_state()
+                            shared.update(validation_message="")
+                        except OSError:
+                            logger.exception("validation_start_failed")
+                            shared.update(validation_message="No pude iniciar la validacion (archivo).")
+                            validation["session"] = None
+
                 if calibrator.is_running():
                     shared.update(
                         calibrating_mode=calibrator.mode or "",
@@ -607,6 +662,75 @@ def _camera_worker(
                                 logger.warning("calibration_failed: %s", exc)
                 else:
                     shared.update(calibrating_mode="", calibration_progress=0.0)
+
+                session = validation["session"]
+                if session is not None:
+                    try:
+                        session.update(
+                            dt_seconds,
+                            metrics,
+                            active_view_id=active_view_id,
+                            active_view_name=active_view.name if active_view else None,
+                            timestamp=dt.datetime.now(),
+                        )
+                    except OSError:
+                        logger.exception("validation_write_failed")
+                        session.runner.cancel()
+                        shared.update(validation_message="Error al guardar la validacion; se cancelo.")
+
+                    runner = session.runner
+                    shared.update(
+                        validation_active=runner.is_active,
+                        validation_phase=runner.phase.value,
+                        validation_scenario=runner.scenario.id,
+                        validation_title=runner.scenario.title,
+                        validation_instruction=runner.scenario.instruction,
+                        validation_progress=runner.progress,
+                        validation_remaining_seconds=runner.remaining_seconds,
+                        validation_scenario_index=runner.scenario_index + 1,
+                        validation_scenario_count=runner.scenario_count,
+                        validation_sample_count=runner.sample_count,
+                        validation_run_id=runner.run_id,
+                        validation_view_name=runner.test_view_name,
+                    )
+
+                    if runner.phase is ValidationPhase.COMPLETE:
+                        try:
+                            report_path = session.write_report()
+                            shared.update(validation_message=f"Reporte: {report_path.name}")
+                        except OSError:
+                            logger.exception("validation_report_failed")
+                            shared.update(validation_message="No pude escribir el reporte de validacion.")
+                        session.close()
+                        smoother.clear()
+                        engine.reset_posture_state()
+                        shared.update(validation_active=False, validation_phase=ValidationPhase.COMPLETE.value)
+                        validation["session"] = None
+                    elif runner.phase is ValidationPhase.CANCELLED:
+                        session.close()
+                        smoother.clear()
+                        engine.reset_posture_state()
+                        shared.update(
+                            validation_active=False,
+                            validation_phase=ValidationPhase.CANCELLED.value,
+                            validation_message="Validacion cancelada. Dataset parcial conservado.",
+                        )
+                        validation["session"] = None
+
+                    if show_camera:
+                        draw_guides(frame, metrics, config.min_visibility)
+                        overlay_lines = validation_overlay_lines(runner)
+                        if overlay_lines:
+                            draw_text_block(frame, overlay_lines, (18, 120), (255, 255, 0), scale=0.6, line_height=24)
+                        shared.update(camera_frame=frame.copy())
+                    else:
+                        shared.update(camera_frame=None)
+
+                    elapsed = time.monotonic() - frame_started_at
+                    sleep_time = frame_interval - elapsed
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    continue
 
                 result = engine.update(metrics, has_pose, dt_seconds, now_ts)
 
@@ -815,6 +939,9 @@ def _camera_worker(
             error_message=str(exc),
         )
     finally:
+        session = validation.get("session")
+        if session is not None:
+            session.close()
         if store is not None:
             store.close()
         if cap is not None:
