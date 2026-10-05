@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from posture_guard.config import Config, load_config
+from posture_guard.config import Config, load_config, save_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "posture_break_guard.config.json"
@@ -86,6 +86,21 @@ class ConfigValidationTests(unittest.TestCase):
         self._write([1, 2, 3])
         with self.assertRaises(ValueError):
             load_config(self.path)
+
+
+class SaveConfigTests(unittest.TestCase):
+    def test_round_trip_preserves_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            save_config(path, Config(break_interval_minutes=33, camera_index=2))
+            loaded = load_config(path)
+            self.assertEqual(loaded.break_interval_minutes, 33)
+            self.assertEqual(loaded.camera_index, 2)
+
+    def test_save_rejects_invalid_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                save_config(Path(tmp) / "config.json", Config(min_visibility=2.0))
 
 
 if __name__ == "__main__":

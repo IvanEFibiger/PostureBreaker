@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -141,6 +142,37 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(store.score, 100.0)
         store.close()
         self.assertTrue(self.db_path.with_name(self.db_path.name + ".corrupt").exists())
+
+
+class HistoryMaintenanceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self._tmp.name) / "history" / "test.db"
+        self.store = AnalyticsStore(self.db_path)
+
+    def tearDown(self) -> None:
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        self._tmp.cleanup()
+
+    def test_clear_history_resets_daily_totals(self) -> None:
+        self.store.add_posture_time(30.0, is_bad=True)
+        self.store.add_work_time(10.0, focus_mode=False)
+        self.store.clear_history()
+        self.assertEqual(self.store.score, 100.0)
+        self.assertEqual(self.store.today_snapshot()["total_work_seconds"], 0.0)
+
+    def test_export_history_writes_daily_stats(self) -> None:
+        self.store.add_posture_time(60.0, is_bad=False)
+        self.store.add_posture_time(40.0, is_bad=True)
+        self.store.flush()
+        dest = self.db_path.parent / "export.json"
+        self.store.export_history(dest)
+        payload = json.loads(dest.read_text(encoding="utf-8"))
+        self.assertEqual(len(payload["daily_stats"]), 1)
+        self.assertEqual(payload["daily_stats"][0]["day"], dt.date.today().isoformat())
 
 
 if __name__ == "__main__":

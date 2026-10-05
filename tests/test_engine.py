@@ -138,5 +138,28 @@ class FocusToggleTests(unittest.TestCase):
         self.assertFalse(engine.focus_mode)
 
 
+class SnoozeTests(unittest.TestCase):
+    def test_snooze_suppresses_posture_alert(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        engine.snooze(now=0.0, minutes=10.0)
+        result = engine.update(bad_metrics(), True, 1.0, 5.0)
+        self.assertNotIn(Event.POSTURE_ALERT, result.events)
+        self.assertTrue(result.snoozed)
+
+    def test_alert_returns_after_snooze_expires(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        engine.snooze(now=0.0, minutes=10.0)
+        engine.update(bad_metrics(), True, 1.0, 5.0)
+        result = engine.update(bad_metrics(), True, 1.0, 700.0)
+        self.assertIn(Event.POSTURE_ALERT, result.events)
+        self.assertFalse(result.snoozed)
+
+    def test_snooze_suppresses_break_alert(self) -> None:
+        engine = PostureEngine(make_config(), make_profile())
+        engine.snooze(now=0.0, minutes=60.0)
+        result = engine.update(good_metrics(), True, 60.0, 100.0)
+        self.assertNotIn(Event.BREAK_ALERT, result.events)
+
+
 if __name__ == "__main__":
     unittest.main()

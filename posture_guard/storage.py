@@ -538,6 +538,33 @@ class AnalyticsStore:
         self.flush()
         self.conn.close()
 
+    def clear_history(self) -> None:
+        for table in (
+            "posture_samples",
+            "posture_events",
+            "break_events",
+            "focus_periods",
+            "sessions",
+            "daily_stats",
+            "hourly_stats",
+        ):
+            self.conn.execute(f"DELETE FROM {table}")
+        self.conn.commit()
+        self._daily = self._empty_daily(self._today)
+        self._ensure_daily_row(self._today)
+        self._hourly = self._empty_hourly()
+        self._focus_period_id = None
+        self._session_id = None
+
+    def export_history(self, dest: Path) -> Path:
+        rows = self.conn.execute("SELECT * FROM daily_stats ORDER BY day").fetchall()
+        payload = {
+            "exported_at": dt.datetime.now().isoformat(timespec="seconds"),
+            "daily_stats": [dict(row) for row in rows],
+        }
+        dest.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return dest
+
 
 def open_store(db_path: Path, legacy_history_dir: Path | None = None) -> AnalyticsStore:
     """Open the analytics database, quarantining and recreating a corrupt file."""

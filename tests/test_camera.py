@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from posture_guard.camera import CameraError, open_camera
+from posture_guard.camera import CameraError, list_cameras, open_camera
 
 
 class _FakeCapture:
@@ -51,6 +51,14 @@ class OpenCameraTests(unittest.TestCase):
                 on_retry=lambda attempt, delay: retries.append((attempt, delay)),
             )
         self.assertEqual(retries, [(1, 3.0)])
+
+
+class ListCamerasTests(unittest.TestCase):
+    def test_returns_only_openable_indices(self) -> None:
+        self.assertEqual(list_cameras(lambda index: _FakeCapture(index in {0, 2}), max_index=3), [0, 2])
+
+    def test_returns_empty_when_none_open(self) -> None:
+        self.assertEqual(list_cameras(lambda index: _FakeCapture(False), max_index=2), [])
 
 
 if __name__ == "__main__":

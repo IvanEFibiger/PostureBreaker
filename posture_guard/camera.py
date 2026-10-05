@@ -32,3 +32,17 @@ def open_camera(
                 on_retry(attempt, delay)
             sleep(delay)
     raise CameraError(f"No pude abrir la camara {index} tras {attempts} intentos.")
+
+
+def list_cameras(factory: Callable[[int], Any], max_index: int = 5) -> list[int]:
+    """Probe camera indices and return the ones that open successfully."""
+    available: list[int] = []
+    for index in range(max_index + 1):
+        capture = factory(index)
+        try:
+            if capture is not None and capture.isOpened():
+                available.append(index)
+        finally:
+            if capture is not None:
+                capture.release()
+    return available

@@ -45,6 +45,7 @@ class EngineResult:
     posture_seconds_delta: float
     count_posture_time: bool
     session_gap_seconds: float = 0.0
+    snoozed: bool = False
     events: list[Event] = field(default_factory=list)
 
 
@@ -58,6 +59,7 @@ class PostureEngine:
         self.state = AlertState()
         self.break_manager = BreakManager(config, self.state)
         self.focus_mode = False
+        self.snooze_until = 0.0
 
     def set_profile(self, profile: CalibrationProfile | None) -> None:
         self.profile = profile
@@ -70,6 +72,12 @@ class PostureEngine:
     def toggle_focus(self) -> Event:
         self.focus_mode = not self.focus_mode
         return Event.FOCUS_STARTED if self.focus_mode else Event.FOCUS_ENDED
+
+    def snooze(self, now: float, minutes: float) -> None:
+        self.snooze_until = now + minutes * 60.0
+
+    def is_snoozed(self, now: float) -> bool:
+        return now < self.snooze_until
 
     def _posture_threshold(self) -> float:
         multiplier = self.config.focus_posture_multiplier if self.focus_mode else 1.0
@@ -110,6 +118,7 @@ class PostureEngine:
         was_active = self.state.posture_active
         threshold = self._posture_threshold()
         cooldown = self._posture_cooldown()
+        snoozed = self.is_snoozed(now)
 
         if posture_bad:
             self.state.bad_posture_streak += dt
@@ -119,6 +128,7 @@ class PostureEngine:
             if (
                 self.state.bad_posture_streak >= threshold
                 and now - self.state.last_posture_alert_at >= cooldown
+                and not snoozed
             ):
                 self.state.last_posture_alert_at = now
                 self.state.posture_alert_count += 1
@@ -132,7 +142,10 @@ class PostureEngine:
             self.state.posture_active = False
 
         for break_event in self.break_manager.update(has_pose, dt, now, self._break_repeat_interval()):
-            events.append(Event(break_event))
+            event = Event(break_event)
+            if snoozed and event in (Event.BREAK_ALERT, Event.BREAK_ALERT_REPEAT):
+                continue
+            events.append(event)
 
         if self.state.break_due:
             break_progress = min(
@@ -168,5 +181,6 @@ class PostureEngine:
             posture_seconds_delta=dt if count_posture_time else 0.0,
             count_posture_time=count_posture_time,
             session_gap_seconds=session_gap_seconds,
+            snoozed=snoozed,
             events=events,
         )
