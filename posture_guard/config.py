@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 
@@ -38,9 +38,84 @@ class Config:
     )
 
 
+_POSITIVE_FIELDS = (
+    "sustained_bad_posture_seconds",
+    "break_interval_minutes",
+    "break_required_seconds",
+    "break_repeat_alert_seconds",
+    "away_reset_seconds",
+    "target_fps",
+    "analytics_sample_seconds",
+    "trend_refresh_seconds",
+    "focus_posture_multiplier",
+    "focus_cooldown_multiplier",
+    "focus_break_repeat_seconds",
+)
+_NON_NEGATIVE_FIELDS = ("posture_alert_cooldown_seconds",)
+_AT_LEAST_ONE_FIELDS = ("calibration_frames", "smoothing_window", "posture_min_bad_metrics")
+_NON_EMPTY_TEXT_FIELDS = ("model_path", "database_path", "history_dir")
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate(config: Config) -> None:
+    if not isinstance(config.camera_index, int) or isinstance(config.camera_index, bool) or config.camera_index < 0:
+        raise ValueError(f"'camera_index' debe ser un entero >= 0 (actual: {config.camera_index!r}).")
+
+    if not _is_number(config.min_visibility) or not 0.0 <= float(config.min_visibility) <= 1.0:
+        raise ValueError(f"'min_visibility' debe estar entre 0 y 1 (actual: {config.min_visibility!r}).")
+
+    for name in _POSITIVE_FIELDS:
+        value = getattr(config, name)
+        if not _is_number(value) or value <= 0:
+            raise ValueError(f"'{name}' debe ser un número mayor que 0 (actual: {value!r}).")
+
+    for name in _NON_NEGATIVE_FIELDS:
+        value = getattr(config, name)
+        if not _is_number(value) or value < 0:
+            raise ValueError(f"'{name}' debe ser un número mayor o igual a 0 (actual: {value!r}).")
+
+    for name in _AT_LEAST_ONE_FIELDS:
+        value = getattr(config, name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"'{name}' debe ser un entero mayor o igual a 1 (actual: {value!r}).")
+
+    for name in _NON_EMPTY_TEXT_FIELDS:
+        value = getattr(config, name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"'{name}' debe ser un texto no vacío (actual: {value!r}).")
+
+    if not isinstance(config.headless, bool):
+        raise ValueError(f"'headless' debe ser true o false (actual: {config.headless!r}).")
+
+    if not isinstance(config.default_margins, dict):
+        raise ValueError("'default_margins' debe ser un objeto con márgenes numéricos.")
+    for name, value in config.default_margins.items():
+        if not _is_number(value) or value < 0:
+            raise ValueError(f"'default_margins.{name}' debe ser un número mayor o igual a 0 (actual: {value!r}).")
+
+
 def load_config(path: Path) -> Config:
     if not path.exists():
         return Config()
 
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return Config(**data)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"No pude leer la config {path}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"La config {path} debe ser un objeto JSON.")
+
+    known = {spec.name for spec in fields(Config)}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        raise ValueError(
+            "Claves desconocidas en la config: " + ", ".join(unknown) + ". Revisá el archivo."
+        )
+
+    config = Config(**data)
+    _validate(config)
+    return config

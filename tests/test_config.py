@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -19,6 +21,71 @@ class ShippedConfigTests(unittest.TestCase):
     def test_falls_back_to_defaults_when_file_is_missing(self) -> None:
         config = load_config(REPO_ROOT / "missing.config.json")
         self.assertEqual(config.posture_min_bad_metrics, 2)
+
+
+class ConfigValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "config.json"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, payload: object) -> None:
+        if isinstance(payload, str):
+            self.path.write_text(payload, encoding="utf-8")
+        else:
+            self.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_valid_override_is_applied(self) -> None:
+        self._write({"break_interval_minutes": 30})
+        self.assertEqual(load_config(self.path).break_interval_minutes, 30)
+
+    def test_unknown_key_raises_with_key_name(self) -> None:
+        self._write({"not_a_real_key": 1})
+        with self.assertRaises(ValueError) as ctx:
+            load_config(self.path)
+        self.assertIn("not_a_real_key", str(ctx.exception))
+
+    def test_min_visibility_above_one_raises(self) -> None:
+        self._write({"min_visibility": 1.5})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_min_visibility_below_zero_raises(self) -> None:
+        self._write({"min_visibility": -0.1})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_negative_duration_raises(self) -> None:
+        self._write({"break_interval_minutes": -5})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_zero_calibration_frames_raises(self) -> None:
+        self._write({"calibration_frames": 0})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_empty_model_path_raises(self) -> None:
+        self._write({"model_path": "  "})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_non_numeric_duration_raises(self) -> None:
+        self._write({"target_fps": "fast"})
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_invalid_json_raises_value_error(self) -> None:
+        self._write("{ not valid json")
+        with self.assertRaises(ValueError):
+            load_config(self.path)
+
+    def test_non_object_json_raises(self) -> None:
+        self._write([1, 2, 3])
+        with self.assertRaises(ValueError):
+            load_config(self.path)
 
 
 if __name__ == "__main__":
