@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-optional.txt
+          pip install -r requirements-build.txt
+      - name: Fetch model
+        run: python scripts/fetch_model.py --variant heavy
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Build
+        run: python -m PyInstaller --noconfirm --clean PostureGuard.spec
+      - name: Copy external model next to the executable
+        run: Copy-Item -LiteralPath "pose_landmarker.task" -Destination "dist\PostureGuard\pose_landmarker.task" -Force
+      - name: Package
+        run: Compress-Archive -Path "dist\PostureGuard\*" -DestinationPath "PostureBreaker-Windows-x64.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: PostureBreaker-Windows-x64.zip
