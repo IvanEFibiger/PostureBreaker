@@ -28,6 +28,7 @@ from .single_instance import SingleInstance
 from .state import SharedState
 from .storage import AnalyticsStore, open_store
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
+from .views import ViewSelector
 
 logger = logging.getLogger(__name__)
 
@@ -282,11 +283,13 @@ def _camera_worker(
     try:
         calibration_set = _load_calibration_set(calibration_path, shared)
         active_view = calibration_set.active_profile() if calibration_set else None
+        active_view_id = active_view.id if active_view else None
         profile = active_view.calibration if active_view else None
         notifications = Notifications()
         engine = PostureEngine(config, profile)
         calibrator = Calibrator(config.calibration_frames)
         smoother = RollingMetrics(config.smoothing_window, config.smoothing_min_observations)
+        selector = ViewSelector(config.view_switch_stability_seconds, initial_id=active_view_id)
         new_view_pending = False
 
         db_path = _resolve_path(data_dir, config.database_path)
@@ -409,6 +412,21 @@ def _camera_worker(
                 dt_seconds = max(0.0, now_ts - last_frame_ts)
                 last_frame_ts = now_ts
 
+                if calibration_set and metrics and metrics.view:
+                    selection = selector.update(calibration_set, metrics.view, dt_seconds)
+                    if selection.profile is not None and selection.profile.id != active_view_id:
+                        active_view = selection.profile
+                        active_view_id = active_view.id
+                        profile = active_view.calibration
+                        engine.set_profile(profile)
+                        engine.reset_posture_state()
+                        store.log_break_event(
+                            "view_changed",
+                            detail=f"Vista: {active_view.name}",
+                            focus_mode=engine.focus_mode,
+                        )
+                        shared.update(calibration_summary=f"Vista: {active_view.name}")
+
                 if shared.consume_command("cmd_calibrate_good"):
                     calibrator.start("good")
                     notifications.generic()
@@ -423,8 +441,10 @@ def _camera_worker(
                 if shared.consume_command("cmd_clear_calibration"):
                     calibration_set = None
                     active_view = None
+                    active_view_id = None
                     profile = None
                     engine.clear_profile()
+                    selector.active_id = None
                     calibrator.cancel()
                     if calibration_path.exists():
                         calibration_path.unlink()
@@ -546,6 +566,8 @@ def _camera_worker(
                                     active_view.head_yaw_std = head_std
                                     active_view.torso_yaw_std = torso_std
                                 new_view_pending = False
+                                active_view_id = active_view.id
+                                selector.active_id = active_view_id
                                 save_calibration_set(calibration_path, calibration_set)
                                 engine.set_profile(profile)
                                 logger.info("calibration_saved quality=%.1f", profile.quality_score)

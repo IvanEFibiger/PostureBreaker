@@ -22,6 +22,7 @@ class Event(StrEnum):
     FOCUS_STARTED = "focus_started"
     FOCUS_ENDED = "focus_ended"
     SESSION_GAP = "session_gap"
+    VIEW_CHANGED = "view_changed"
 
 
 @dataclass
@@ -66,6 +67,10 @@ class PostureEngine:
 
     def clear_profile(self) -> None:
         self.profile = None
+        self.state.posture_active = False
+        self.state.bad_posture_streak = 0.0
+
+    def reset_posture_state(self) -> None:
         self.state.posture_active = False
         self.state.bad_posture_streak = 0.0
 
