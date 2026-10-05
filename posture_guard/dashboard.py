@@ -343,7 +343,7 @@ class Dashboard(ctk.CTk):
         active = bool(snap.get("validation_active", False))
         phase = str(snap.get("validation_phase", ""))
         message = str(snap.get("validation_message", ""))
-        if active or phase in ("prepare", "capture"):
+        if active or phase in ("reset", "prepare", "capture"):
             title = str(snap.get("validation_title", ""))
             instruction = str(snap.get("validation_instruction", ""))
             index = int(snap.get("validation_scenario_index", 0))
@@ -351,7 +351,9 @@ class Dashboard(ctk.CTk):
             remaining = float(snap.get("validation_remaining_seconds", 0.0))
             samples = int(snap.get("validation_sample_count", 0))
             self._validation_title.configure(text=f"VALIDACION V2 - {index} / {count}")
-            if phase == "prepare":
+            if phase == "reset":
+                body = f"Volve a tu postura normal.\n\nPreparando siguiente prueba... {int(round(remaining))} s"
+            elif phase == "prepare":
                 body = f"{title}\n\n{instruction}\n\nPreparacion: comenzamos en {int(round(remaining))} s"
             else:
                 body = f"{title}\n\nCAPTURANDO: {int(round(remaining))} s\n{samples} muestras"

@@ -39,6 +39,11 @@ def main(argv: list[str]) -> int:
         for name in metric_names:
             print(f"  {name:<24} {separability(summary, name):.2f}")
 
+    print(
+        "\nEffect es un indicador de separabilidad intra-metrica; "
+        "no comparar su magnitud entre metricas distintas."
+    )
+
     # Each scenario is compared only against the baseline of its own view.
     comparison = compare_to_view_baselines(summary, baseline_scenario)
     if comparison:

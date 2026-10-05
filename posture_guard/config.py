@@ -37,6 +37,7 @@ class Config:
     smoothing_window: int = 12
     smoothing_min_observations: int = 6
     debug_snapshot_path: str = "history/debug_snapshots.jsonl"
+    validation_reset_seconds: float = 2.5
     validation_prepare_seconds: float = 4.0
     validation_capture_seconds: float = 20.0
     validation_sample_interval_seconds: float = 0.5
@@ -87,6 +88,7 @@ _POSITIVE_FIELDS = (
     "focus_break_repeat_seconds",
     "snooze_minutes",
     "view_switch_stability_seconds",
+    "validation_reset_seconds",
     "validation_prepare_seconds",
     "validation_capture_seconds",
     "validation_sample_interval_seconds",

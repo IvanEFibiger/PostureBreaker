@@ -282,6 +282,15 @@ class CalibrationSetTests(unittest.TestCase):
         self.assertAlmostEqual(restored.active_profile().metric_baselines["head_roll"].center, 1.0)
         self.assertAlmostEqual(restored.global_baselines["neck_roll_delta"].spread, 0.4)
 
+    def test_geometry_version_stamped_and_legacy_files_default_to_zero(self) -> None:
+        from posture_guard.models import GEOMETRY_VERSION
+
+        self.assertEqual(CalibrationSet().geometry_version, GEOMETRY_VERSION)
+        restored = CalibrationSet.from_json(CalibrationSet().to_json())
+        self.assertEqual(restored.geometry_version, GEOMETRY_VERSION)
+        # A file written by the old pipeline has no geometry_version -> 0.
+        self.assertEqual(CalibrationSet.from_json({"schema_version": 3, "profiles": []}).geometry_version, 0)
+
     def test_v2_set_without_baselines_still_loads(self) -> None:
         payload = {
             "schema_version": 2,

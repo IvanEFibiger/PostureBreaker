@@ -30,7 +30,7 @@ from .detection import RollingMetrics, extract_metrics
 from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
-from .models import CalibrationSet, ViewProfile
+from .models import GEOMETRY_VERSION, CalibrationSet, ViewProfile
 from .notifications import Notifications
 from .single_instance import SingleInstance
 from .state import SharedState
@@ -203,7 +203,21 @@ def _handle_events(
 
 def _load_calibration_set(calibration_path: Path, shared: SharedState):
     try:
-        return load_calibration_set(calibration_path)
+        calibration_set = load_calibration_set(calibration_path)
+        if calibration_set is not None and calibration_set.geometry_version != GEOMETRY_VERSION:
+            logger.warning(
+                "calibration_geometry_outdated stored=%s current=%s",
+                calibration_set.geometry_version,
+                GEOMETRY_VERSION,
+            )
+            shared.update(
+                calibrated=False,
+                calibration_summary=(
+                    "Calibracion de una geometria anterior; recalibra antes de validar."
+                ),
+            )
+            return None
+        return calibration_set
     except Exception:
         logger.exception("calibration_load_failed")
         shared.update(
@@ -402,7 +416,7 @@ def _camera_worker(
         with PoseLandmarker.create_from_options(options) as landmarker:
             while not shared.consume_command("cmd_quit"):
                 frame_started_at = time.monotonic()
-                ok, frame = cap.read()
+                ok, raw_frame = cap.read()
                 if not ok:
                     session = validation["session"]
                     if session is not None:
@@ -426,12 +440,15 @@ def _camera_worker(
                         return
                     continue
 
-                frame = cv2.flip(frame, 1)
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # MediaPipe must see the RAW (unmirrored) frame so anatomical
+                # left/right stays correct; the UI preview is mirrored only for
+                # the user, and only rendering flips x (see draw_guides mirror).
+                rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 timestamp_ms = int(time.monotonic() * 1000)
                 detection = landmarker.detect_for_video(mp_image, timestamp_ms)
 
+                frame = cv2.flip(raw_frame, 1)
                 preferred_side = profile.side if profile else None
                 raw_metrics = extract_metrics(detection, config, preferred_side=preferred_side)
                 if raw_metrics:
@@ -593,10 +610,11 @@ def _camera_worker(
                                     config.validation_capture_seconds,
                                 ),
                                 sample_interval_seconds=config.validation_sample_interval_seconds,
+                                reset_seconds=config.validation_reset_seconds,
                                 run_id=make_run_id(dt.datetime.now()),
                                 test_view_id=active_view.id,
                                 test_view_name=active_view.name,
-                                directory=data_dir / "validation",
+                                directory=data_dir / config.history_dir / "validation",
                             )
                             smoother.clear()
                             engine.reset_posture_state()
@@ -679,6 +697,10 @@ def _camera_worker(
                         shared.update(validation_message="Error al guardar la validacion; se cancelo.")
 
                     runner = session.runner
+                    # Clear the smoother during RESET so PREPARE refills it and the
+                    # next CAPTURE never starts from the previous scenario's posture.
+                    if runner.phase is ValidationPhase.RESET:
+                        smoother.clear()
                     shared.update(
                         validation_active=runner.is_active,
                         validation_phase=runner.phase.value,
@@ -718,7 +740,7 @@ def _camera_worker(
                         validation["session"] = None
 
                     if show_camera:
-                        draw_guides(frame, metrics, config.min_visibility)
+                        draw_guides(frame, metrics, config.min_visibility, mirror=True)
                         overlay_lines = validation_overlay_lines(runner)
                         if overlay_lines:
                             draw_text_block(frame, overlay_lines, (18, 120), (255, 255, 0), scale=0.6, line_height=24)
@@ -882,7 +904,7 @@ def _camera_worker(
                     last_refresh_at = now_ts
 
                 if show_camera:
-                    draw_guides(frame, metrics, config.min_visibility)
+                    draw_guides(frame, metrics, config.min_visibility, mirror=True)
                     side_text = profile.side if profile else "sin calibrar"
                     info_lines = [
                         f"Lado: {metrics.side if metrics else '-'} | Cal: {side_text}",

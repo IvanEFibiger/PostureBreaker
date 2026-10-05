@@ -6,7 +6,14 @@ from typing import Any
 
 import cv2
 
-from .guides import landmark_color, planned_segments, visible_landmarks
+from .guides import (
+    LATERAL_LANDMARKS,
+    display_point,
+    landmark_color,
+    laterality_label,
+    planned_segments,
+    visible_landmarks,
+)
 from .models import DetectionMetrics
 
 
@@ -291,21 +298,37 @@ def draw_text_block(
         )
 
 
-def _draw_v2_guides(frame: Any, metrics: DetectionMetrics, min_visibility: float) -> None:
+def _px(x: float, y: float, width: int, height: int, mirror: bool) -> tuple[int, int]:
+    display_x, display_y = display_point(x, y, mirror)
+    return (int(display_x * width), int(display_y * height))
+
+
+def _draw_v2_guides(frame: Any, metrics: DetectionMetrics, min_visibility: float, mirror: bool) -> None:
     h, w = frame.shape[:2]
     visible = visible_landmarks(metrics.debug_landmarks, min_visibility)
 
     px_points: dict[str, tuple[int, int]] = {}
     for name, landmark in visible.items():
-        point = (int(landmark.x * w), int(landmark.y * h))
+        point = _px(landmark.x, landmark.y, w, h, mirror)
         px_points[name] = point
         cv2.circle(frame, point, 4, landmark_color(name), -1)
+        if name in LATERAL_LANDMARKS:
+            cv2.putText(
+                frame,
+                laterality_label(name),
+                (point[0] + 6, point[1] - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                landmark_color(name),
+                2,
+                cv2.LINE_AA,
+            )
 
     for a, b, color, thickness in planned_segments(set(px_points)):
         cv2.line(frame, px_points[a], px_points[b], color, thickness)
 
 
-def _draw_legacy_guides(frame: Any, metrics: DetectionMetrics) -> None:
+def _draw_legacy_guides(frame: Any, metrics: DetectionMetrics, mirror: bool) -> None:
     h, w = frame.shape[:2]
     colors = {
         "ear": (0, 255, 255),
@@ -316,10 +339,8 @@ def _draw_legacy_guides(frame: Any, metrics: DetectionMetrics) -> None:
 
     px_points: dict[str, tuple[int, int]] = {}
     for name, point in metrics.points.items():
-        px = int(point[0] * w)
-        py = int(point[1] * h)
-        px_points[name] = (px, py)
-        cv2.circle(frame, (px, py), 5, colors.get(name, (255, 255, 255)), -1)
+        px_points[name] = _px(point[0], point[1], w, h, mirror)
+        cv2.circle(frame, px_points[name], 5, colors.get(name, (255, 255, 255)), -1)
 
     if {"ear", "shoulder", "hip", "nose"}.issubset(px_points.keys()):
         cv2.line(frame, px_points["ear"], px_points["shoulder"], (0, 255, 255), 2)
@@ -327,18 +348,23 @@ def _draw_legacy_guides(frame: Any, metrics: DetectionMetrics) -> None:
         cv2.line(frame, px_points["nose"], px_points["shoulder"], (255, 0, 255), 1)
 
 
-def draw_guides(frame: Any, metrics: DetectionMetrics | None, min_visibility: float = 0.0) -> None:
+def draw_guides(
+    frame: Any,
+    metrics: DetectionMetrics | None,
+    min_visibility: float = 0.0,
+    mirror: bool = False,
+) -> None:
     """Draw the V2 landmark overlay, falling back to the legacy points.
 
-    Legacy ``metrics.points`` only carries the selected side; the V2 debug
-    landmarks carry both sides plus optional body points, so the desk battery
-    can be verified visually.
+    Landmarks/points are in raw model coordinates; pass ``mirror=True`` when the
+    frame being drawn is the horizontally flipped display preview, so only the
+    rendering flips x (physics/geometry stay in raw coordinates).
     """
     if not metrics:
         return
     if metrics.debug_landmarks:
-        _draw_v2_guides(frame, metrics, min_visibility)
+        _draw_v2_guides(frame, metrics, min_visibility, mirror)
     else:
-        _draw_legacy_guides(frame, metrics)
+        _draw_legacy_guides(frame, metrics, mirror)
 
 

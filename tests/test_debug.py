@@ -57,7 +57,9 @@ class SnapshotLabelTests(unittest.TestCase):
     def test_labels_are_scenarios_not_monitors(self) -> None:
         self.assertIn("good", SNAPSHOT_LABELS)
         self.assertIn("head_forward", SNAPSHOT_LABELS)
-        self.assertIn("head_torso_turn", SNAPSHOT_LABELS)
+        self.assertIn("head_torso_turn_left", SNAPSHOT_LABELS)
+        self.assertIn("head_turn_right", SNAPSHOT_LABELS)
+        self.assertIn("head_torso_turn_right", SNAPSHOT_LABELS)
         self.assertFalse(any("monitor" in label for label in SNAPSHOT_LABELS))
 
     def test_desk_protocol_excludes_hip_scenarios(self) -> None:

@@ -38,8 +38,10 @@ SNAPSHOT_LABELS: tuple[str, ...] = (
     "shoulders_up",
     "shoulder_left_up",
     "shoulder_right_up",
-    "head_turn_only",
-    "head_torso_turn",
+    "head_turn_left",
+    "head_turn_right",
+    "head_torso_turn_left",
+    "head_torso_turn_right",
 )
 
 # Secondary, full-body-only scenarios: physically require the hips on screen, so

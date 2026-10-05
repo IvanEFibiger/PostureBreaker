@@ -29,6 +29,7 @@ _SEPARABILITY_FLOOR = 1e-6
 @dataclass(frozen=True)
 class MetricStats:
     count: int
+    total: int
     mean: float
     std: float
     median: float
@@ -130,6 +131,7 @@ def summarize_snapshots(
             median = statistics.median(values)
             stats[name] = MetricStats(
                 count=len(values),
+                total=len(rows),
                 mean=statistics.fmean(values),
                 std=statistics.pstdev(values) if len(values) > 1 else 0.0,
                 median=median,
@@ -163,7 +165,7 @@ def format_summary(summary: dict[str, dict[str, MetricStats]]) -> str:
                 f"  {name:<24} median {stats.median:+.3f}  mad {stats.mad:.3f}  "
                 f"mean {stats.mean:+.3f}  std {stats.std:.3f}  "
                 f"min {stats.minimum:+.3f}  max {stats.maximum:+.3f}  "
-                f"cov {stats.coverage:.0%}  conf {stats.confidence:.0%}"
+                f"cov {stats.coverage:.0%} ({stats.count}/{stats.total})  conf {stats.confidence:.0%}"
             )
         lines.append("")
     return "\n".join(lines).rstrip()

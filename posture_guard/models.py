@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# Coordinate/geometry convention version. Bumped whenever the landmark pipeline
+# changes what raw coordinates mean (e.g. the mirrored -> raw MediaPipe fix).
+# Calibrations stamped with an older value must be recalibrated, never migrated.
+GEOMETRY_VERSION = 2
+
 
 @dataclass
 class MetricThreshold:
@@ -159,6 +164,7 @@ class ViewProfile:
 @dataclass
 class CalibrationSet:
     schema_version: int = 3
+    geometry_version: int = GEOMETRY_VERSION
     profiles: list[ViewProfile] = field(default_factory=list)
     active_profile_id: str | None = None
     global_baselines: dict[str, MetricBaseline] = field(default_factory=dict)
@@ -172,6 +178,7 @@ class CalibrationSet:
     def to_json(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "geometry_version": self.geometry_version,
             "profiles": [profile.to_json() for profile in self.profiles],
             "active_profile_id": self.active_profile_id,
             "global_baselines": {
@@ -181,13 +188,22 @@ class CalibrationSet:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> CalibrationSet:
+        # A missing ``geometry_version`` means the old (pre-mirroring) pipeline;
+        # default to 0 so it is detected as requiring recalibration.
+        geometry_version = int(data.get("geometry_version", 0))
         # A file without ``schema_version`` is the V1 single-profile format.
         if "schema_version" not in data:
             view = ViewProfile(id="principal", name="Principal", calibration=CalibrationProfile.from_json(data))
-            return cls(schema_version=3, profiles=[view], active_profile_id="principal")
+            return cls(
+                schema_version=3,
+                geometry_version=geometry_version,
+                profiles=[view],
+                active_profile_id="principal",
+            )
         global_payload = data.get("global_baselines") or {}
         return cls(
             schema_version=3,
+            geometry_version=geometry_version,
             profiles=[ViewProfile.from_json(payload) for payload in data.get("profiles", [])],
             active_profile_id=data.get("active_profile_id"),
             global_baselines={

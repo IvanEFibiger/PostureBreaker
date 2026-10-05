@@ -6,9 +6,13 @@ from posture_guard.guides import (
     DEBUG_LANDMARK_NAMES,
     FACE_COLOR,
     GUIDE_SEGMENTS,
+    LATERAL_LANDMARKS,
     OPTIONAL_COLOR,
     SHOULDER_COLOR,
+    display_point,
+    display_x,
     landmark_color,
+    laterality_label,
     planned_segments,
     visible_landmarks,
 )
@@ -102,6 +106,37 @@ class OutOfFrameTests(unittest.TestCase):
         landmarks = full_set()
         landmarks["right_hip"] = DebugLandmark(2.0, 2.0, 0.1)
         self.assertNotIn("right_hip", visible_landmarks(landmarks, min_visibility=0.55))
+
+
+class MirrorTransformTests(unittest.TestCase):
+    def test_mirror_flips_x(self) -> None:
+        self.assertAlmostEqual(display_x(0.20, True), 0.80)
+        self.assertAlmostEqual(display_x(0.80, True), 0.20)
+
+    def test_no_mirror_keeps_x(self) -> None:
+        self.assertAlmostEqual(display_x(0.20, False), 0.20)
+        self.assertAlmostEqual(display_x(0.80, False), 0.80)
+
+    def test_display_point_never_changes_y(self) -> None:
+        for raw_x, expected_x in ((0.20, 0.80), (0.80, 0.20)):
+            x, y = display_point(raw_x, 0.33, True)
+            self.assertAlmostEqual(x, expected_x)
+            self.assertEqual(y, 0.33)
+        x, y = display_point(0.80, 0.33, False)
+        self.assertAlmostEqual(x, 0.80)
+        self.assertEqual(y, 0.33)
+
+
+class LateralityLabelTests(unittest.TestCase):
+    def test_anatomical_labels(self) -> None:
+        self.assertEqual(laterality_label("left_shoulder"), "L")
+        self.assertEqual(laterality_label("right_shoulder"), "R")
+        self.assertEqual(laterality_label("left_ear"), "L")
+        self.assertEqual(laterality_label("right_ear"), "R")
+        self.assertEqual(laterality_label("nose"), "")
+
+    def test_lateral_landmarks_are_labelled(self) -> None:
+        self.assertTrue(set(LATERAL_LANDMARKS).issubset(set(DEBUG_LANDMARK_NAMES)))
 
 
 class LandmarkColorTests(unittest.TestCase):

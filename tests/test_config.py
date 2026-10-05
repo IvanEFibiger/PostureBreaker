@@ -92,6 +92,10 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(config.debug_snapshot_path, "history/debug_snapshots.jsonl")
         self.assertTrue(config.posture_v2_observe_only)
         self.assertEqual(config.view_switch_stability_seconds, 0.75)
+        self.assertEqual(config.validation_reset_seconds, 2.5)
+        self.assertEqual(config.validation_prepare_seconds, 4.0)
+        self.assertEqual(config.validation_capture_seconds, 20.0)
+        self.assertEqual(config.validation_sample_interval_seconds, 0.5)
 
     def test_invalid_observe_only_type_raises(self) -> None:
         self._write({"posture_v2_observe_only": "yes"})

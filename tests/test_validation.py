@@ -9,18 +9,21 @@ from pathlib import Path
 from posture_guard.debug import SNAPSHOT_LABELS
 from posture_guard.models import DetectionMetrics, MetricObservation, ViewState
 from posture_guard.validation import (
+    EFFECT_DISCLAIMER,
     SCENARIO_GUIDES,
     ValidationPhase,
     ValidationRunner,
     ValidationSession,
     build_desk_scenarios,
+    build_run_comparison,
     build_validation_report,
+    build_view_difference,
     make_run_id,
     validation_overlay_lines,
 )
 
 
-def make_runner(scenarios, *, interval=0.1, sink=None, run_id="20261005-181530"):
+def make_runner(scenarios, *, interval=0.1, sink=None, run_id="20261005-181530", reset=0.0):
     samples: list[dict] = [] if sink is None else sink
     runner = ValidationRunner(
         scenarios,
@@ -28,6 +31,7 @@ def make_runner(scenarios, *, interval=0.1, sink=None, run_id="20261005-181530")
         run_id=run_id,
         test_view_id="view_1",
         test_view_name="Monitor 2",
+        reset_seconds=reset,
         sample_sink=samples.append,
     )
     return runner, samples
@@ -50,6 +54,17 @@ class ScenarioTests(unittest.TestCase):
             self.assertEqual(scenario.instruction, instruction)
             self.assertEqual(scenario.prepare_seconds, 4.0)
             self.assertEqual(scenario.capture_seconds, 20.0)
+
+    def test_turn_scenarios_are_independent(self) -> None:
+        ids = [s.id for s in build_desk_scenarios(4.0, 20.0)]
+        for name in (
+            "head_turn_left",
+            "head_turn_right",
+            "head_torso_turn_left",
+            "head_torso_turn_right",
+        ):
+            self.assertIn(name, ids)
+        self.assertEqual(len(ids), len(set(ids)))
 
     def test_full_body_scenarios_are_excluded(self) -> None:
         ids = {s.id for s in build_desk_scenarios(4.0, 20.0)}
@@ -117,6 +132,29 @@ class StateMachineTests(unittest.TestCase):
         self.assertIs(runner.phase, ValidationPhase.CANCELLED)
 
 
+class ResetPhaseTests(unittest.TestCase):
+    def test_reset_precedes_prepare_and_samples_nothing(self) -> None:
+        scenarios = build_desk_scenarios(0.2, 0.3)[:1]
+        runner, samples = make_runner(scenarios, reset=0.5)
+        runner.start()
+        self.assertIs(runner.phase, ValidationPhase.RESET)
+        runner.update(0.2, None)
+        self.assertIs(runner.phase, ValidationPhase.RESET)
+        self.assertEqual(runner.sample_count, 0)
+        runner.update(0.4, None)  # 0.6 >= 0.5 -> PREPARE
+        self.assertIs(runner.phase, ValidationPhase.PREPARE)
+        drive(runner)
+        self.assertIs(runner.phase, ValidationPhase.COMPLETE)
+        self.assertTrue(samples)
+
+    def test_overlay_lines_have_reset_phase(self) -> None:
+        scenarios = build_desk_scenarios(0.2, 0.3)[:1]
+        runner, _ = make_runner(scenarios, reset=1.0)
+        runner.start()
+        text = "\n".join(validation_overlay_lines(runner))
+        self.assertIn("POSTURA NORMAL", text)
+
+
 class MetadataTests(unittest.TestCase):
     def test_run_id_and_test_view_are_constant(self) -> None:
         scenarios = build_desk_scenarios(0.0, 0.3)
@@ -127,6 +165,19 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual({s["run_id"] for s in samples}, {"run-A"})
         self.assertEqual({s["test_view"]["name"] for s in samples}, {"Monitor 2"})
         self.assertEqual({s["active_view"]["name"] for s in samples}, {"Monitor 1"})
+
+    def test_active_view_changed_is_recorded(self) -> None:
+        scenarios = build_desk_scenarios(0.0, 0.3)[:1]
+        runner, samples = make_runner(scenarios, interval=0.1)
+        runner.start()
+        runner.update(0.1, None, active_view_id="A", active_view_name="A")  # PREPARE -> CAPTURE
+        runner.update(0.1, None, active_view_id="A", active_view_name="A")  # first sample (A)
+        guard = 0
+        while runner.is_active and guard < 1000:
+            runner.update(0.1, None, active_view_id="B", active_view_name="B")
+            guard += 1
+        self.assertTrue(any(s["active_view_changed"] for s in samples))
+        self.assertTrue(any(not s["active_view_changed"] for s in samples))
 
     def test_sample_metadata_fields(self) -> None:
         scenarios = build_desk_scenarios(0.0, 0.2)[:1]
@@ -164,6 +215,94 @@ class StatusTests(unittest.TestCase):
         runner.update(1.0, None)  # PREPARE -> CAPTURE
         capture_lines = "\n".join(validation_overlay_lines(runner))
         self.assertIn("CAPTURANDO", capture_lines)
+
+
+def view_snapshot(
+    scenario: str,
+    view_name: str,
+    *,
+    torso_yaw: float = 0.0,
+    depth: float = 0.10,
+    left_elev: float = 1.0,
+    right_elev: float = 1.0,
+    active_changed: bool = False,
+) -> dict:
+    return {
+        "scenario": scenario,
+        "label": scenario,
+        "run_id": "run",
+        "test_view": {"id": view_name, "name": view_name},
+        "active_view": {"id": view_name, "name": view_name},
+        "active_view_changed": active_changed,
+        "metrics": {"chin_drop": 0.03},
+        "confidence": {"chin_drop": 1.0},
+        "view": {"orientation": "center", "confidence": 0.9, "torso_yaw": torso_yaw},
+        "shoulders": None,
+        "forward": None,
+        "observations": {
+            "head_depth_ratio": {"value": depth, "confidence": 0.9},
+            "left_shoulder_elevation": {"value": left_elev, "confidence": 0.9},
+            "right_shoulder_elevation": {"value": right_elev, "confidence": 0.9},
+            "torso_yaw": {"value": torso_yaw, "confidence": 0.9},
+        },
+    }
+
+
+class ReportTests(unittest.TestCase):
+    def _snapshots(self) -> list[dict]:
+        return [
+            view_snapshot("good", "Monitor 2", torso_yaw=158.0, depth=0.12),
+            view_snapshot("head_forward", "Monitor 2", torso_yaw=158.0, depth=0.13),
+            view_snapshot("shoulder_left_up", "Monitor 2", left_elev=0.95, right_elev=0.80, active_changed=True),
+            view_snapshot("shoulder_right_up", "Monitor 2", left_elev=0.80, right_elev=0.95),
+        ]
+
+    def test_v2_only_by_default_excludes_legacy(self) -> None:
+        report = build_validation_report("r", self._snapshots(), test_view_name="Monitor 2")
+        self.assertIn("metricas: V2 only", report)
+        self.assertIn("head_depth_ratio", report)
+        self.assertNotIn("chin_drop", report)
+
+    def test_include_legacy_opt_in(self) -> None:
+        report = build_validation_report("r", self._snapshots(), include_legacy=True)
+        self.assertIn("metricas: V2 + legacy", report)
+        self.assertIn("chin_drop", report)
+
+    def test_torso_yaw_is_displayed_folded(self) -> None:
+        report = build_validation_report("r", self._snapshots(), test_view_name="Monitor 2")
+        self.assertIn("-22", report)  # 158 -> -22
+        self.assertNotIn("+158", report)
+
+    def test_coverage_shows_count_over_total(self) -> None:
+        report = build_validation_report("r", self._snapshots())
+        self.assertIn("(1/1)", report)
+
+    def test_effect_disclaimer_present(self) -> None:
+        report = build_validation_report("r", self._snapshots())
+        self.assertIn(EFFECT_DISCLAIMER, report)
+
+    def test_lateralization_section_present(self) -> None:
+        report = build_validation_report("r", self._snapshots())
+        self.assertIn("Lateralization check", report)
+        self.assertIn("shoulder_left_up", report)
+
+    def test_active_view_changes_reported(self) -> None:
+        report = build_validation_report("r", self._snapshots())
+        self.assertIn("active view changes during run: 1", report)
+
+    def test_run_comparison_reports_reproducibility(self) -> None:
+        run_a = [view_snapshot("good", "Monitor 2", depth=0.10), view_snapshot("head_down", "Monitor 2", depth=0.12)]
+        run_b = [view_snapshot("good", "Monitor 2", depth=0.10), view_snapshot("head_down", "Monitor 2", depth=0.15)]
+        text = build_run_comparison("A", run_a, "B", run_b)
+        self.assertIn("Reproducibilidad de baseline", text)
+        self.assertIn("Reproducibilidad de respuesta", text)
+        self.assertIn("head_depth_ratio", text)
+
+    def test_view_difference_lists_views(self) -> None:
+        snaps = [view_snapshot("good", "Monitor 1", depth=0.20), view_snapshot("good", "Monitor 2", depth=0.10)]
+        text = build_view_difference(snaps)
+        self.assertIn("good @ Monitor 1", text)
+        self.assertIn("good @ Monitor 2", text)
 
 
 class SessionTests(unittest.TestCase):

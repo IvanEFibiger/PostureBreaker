@@ -19,6 +19,7 @@ from .dataset import (
     summarize_snapshots,
 )
 from .debug import SNAPSHOT_LABELS, build_snapshot
+from .orientation import torso_yaw_display
 
 # One guided run stays observe-only: it produces a dataset, never a verdict.
 DEFAULT_BASELINE_SCENARIO = "good"
@@ -35,6 +36,7 @@ class ValidationScenario:
 
 class ValidationPhase(StrEnum):
     IDLE = "idle"
+    RESET = "reset"
     PREPARE = "prepare"
     CAPTURE = "capture"
     COMPLETE = "complete"
@@ -45,15 +47,39 @@ class ValidationPhase(StrEnum):
 # scenario order and ids come from the single source of truth SNAPSHOT_LABELS.
 SCENARIO_GUIDES: dict[str, tuple[str, str]] = {
     "good": ("Postura normal", "Sentate como trabajas normalmente y mira tu monitor."),
-    "head_forward": ("Cabeza adelantada", "Adelanta la cabeza hacia la pantalla sin mover los hombros."),
+    "head_forward": (
+        "Cabeza adelantada",
+        "Adelanta claramente la cabeza hacia la pantalla, manteniendo hombros y torso lo mas quietos posible. "
+        "No mires hacia abajo ni encores la espalda. Un cambio claro, no el maximo.",
+    ),
     "head_down": ("Mirada hacia abajo", "Baja la mirada sin inclinar deliberadamente el torso."),
-    "head_tilt_left": ("Cabeza inclinada a la izquierda", "Inclina la cabeza hacia la izquierda sin subir los hombros."),
-    "head_tilt_right": ("Cabeza inclinada a la derecha", "Inclina la cabeza hacia la derecha sin subir los hombros."),
+    "head_tilt_left": (
+        "Cabeza inclinada a la izquierda",
+        "Inclina claramente la cabeza hacia tu izquierda, manteniendo hombros y mirada lo mas estables posible.",
+    ),
+    "head_tilt_right": (
+        "Cabeza inclinada a la derecha",
+        "Inclina claramente la cabeza hacia tu derecha, manteniendo hombros y mirada lo mas estables posible.",
+    ),
     "shoulders_up": ("Ambos hombros elevados", "Eleva ambos hombros manteniendo la cabeza lo mas estable posible."),
-    "shoulder_left_up": ("Hombro izquierdo elevado", "Eleva solo el hombro izquierdo."),
-    "shoulder_right_up": ("Hombro derecho elevado", "Eleva solo el hombro derecho."),
-    "head_turn_only": ("Giro solo de cabeza", "Gira la cabeza hacia un lado manteniendo los hombros quietos."),
-    "head_torso_turn": ("Giro de cabeza y hombros", "Gira cabeza y hombros juntos hacia el mismo lado."),
+    "shoulder_left_up": ("Hombro izquierdo elevado", "Eleva solo tu hombro izquierdo."),
+    "shoulder_right_up": ("Hombro derecho elevado", "Eleva solo tu hombro derecho."),
+    "head_turn_left": (
+        "Giro de cabeza a la izquierda",
+        "Gira la cabeza hacia tu izquierda manteniendo los hombros quietos.",
+    ),
+    "head_turn_right": (
+        "Giro de cabeza a la derecha",
+        "Gira la cabeza hacia tu derecha manteniendo los hombros quietos.",
+    ),
+    "head_torso_turn_left": (
+        "Giro de cabeza y hombros a la izquierda",
+        "Gira cabeza y hombros juntos hacia tu izquierda.",
+    ),
+    "head_torso_turn_right": (
+        "Giro de cabeza y hombros a la derecha",
+        "Gira cabeza y hombros juntos hacia tu derecha.",
+    ),
 }
 
 
@@ -97,11 +123,13 @@ class ValidationRunner:
         test_view_id: str | None,
         test_view_name: str,
         sample_sink: Callable[[dict[str, Any]], None],
+        reset_seconds: float = 0.0,
     ) -> None:
         if not scenarios:
             raise ValueError("La validacion necesita al menos un escenario.")
         self.scenarios = list(scenarios)
         self.sample_interval_seconds = max(sample_interval_seconds, 1e-6)
+        self.reset_seconds = max(reset_seconds, 0.0)
         self.run_id = run_id
         self.test_view_id = test_view_id
         self.test_view_name = test_view_name
@@ -113,6 +141,7 @@ class ValidationRunner:
         self._phase_elapsed = 0.0
         self._scenario_sample_index = 0
         self._next_sample_at = 0.0
+        self._last_active_view_id: str | None = None
 
     # -- status for the UI -------------------------------------------------
     @property
@@ -125,15 +154,20 @@ class ValidationRunner:
 
     @property
     def is_active(self) -> bool:
-        return self.phase in (ValidationPhase.PREPARE, ValidationPhase.CAPTURE)
+        return self.phase in (ValidationPhase.RESET, ValidationPhase.PREPARE, ValidationPhase.CAPTURE)
 
     @property
     def remaining_seconds(self) -> float:
+        if self.phase is ValidationPhase.RESET:
+            return max(0.0, self.reset_seconds - self._phase_elapsed)
         if self.phase is ValidationPhase.PREPARE:
             return max(0.0, self.scenario.prepare_seconds - self._phase_elapsed)
         if self.phase is ValidationPhase.CAPTURE:
             return max(0.0, self.scenario.capture_seconds - self._phase_elapsed)
         return 0.0
+
+    def _scenario_total(self) -> float:
+        return self.reset_seconds + self.scenario.prepare_seconds + self.scenario.capture_seconds
 
     @property
     def progress(self) -> float:
@@ -142,21 +176,23 @@ class ValidationRunner:
         if self.phase is ValidationPhase.CANCELLED or self.scenario_count == 0:
             return 0.0
         scenario = self.scenario
-        total = scenario.prepare_seconds + scenario.capture_seconds
+        total = self._scenario_total()
         if total <= 0:
             fraction = 1.0
-        elif self.phase is ValidationPhase.PREPARE:
+        elif self.phase is ValidationPhase.RESET:
             fraction = self._phase_elapsed / total
+        elif self.phase is ValidationPhase.PREPARE:
+            fraction = (self.reset_seconds + self._phase_elapsed) / total
         elif self.phase is ValidationPhase.CAPTURE:
-            fraction = (scenario.prepare_seconds + self._phase_elapsed) / total
+            fraction = (self.reset_seconds + scenario.prepare_seconds + self._phase_elapsed) / total
         else:
             fraction = 0.0
         return min(1.0, (self.scenario_index + fraction) / self.scenario_count)
 
     def start(self) -> None:
-        self.phase = ValidationPhase.PREPARE
         self.scenario_index = 0
-        self._begin_phase()
+        self._last_active_view_id = None
+        self._begin_scenario()
 
     def cancel(self) -> None:
         if self.is_active:
@@ -173,7 +209,12 @@ class ValidationRunner:
     ) -> None:
         """Advance the state machine using ``dt`` (never ``sleep``)."""
         dt = max(0.0, dt)
-        if self.phase is ValidationPhase.PREPARE:
+        if self.phase is ValidationPhase.RESET:
+            self._phase_elapsed += dt
+            if self._phase_elapsed >= self.reset_seconds:
+                self.phase = ValidationPhase.PREPARE
+                self._begin_phase()
+        elif self.phase is ValidationPhase.PREPARE:
             self._phase_elapsed += dt
             if self._phase_elapsed >= self.scenario.prepare_seconds:
                 self._begin_capture()
@@ -184,6 +225,10 @@ class ValidationRunner:
                 self._finish_scenario()
 
     # -- internals ---------------------------------------------------------
+    def _begin_scenario(self) -> None:
+        self._phase_elapsed = 0.0
+        self.phase = ValidationPhase.RESET if self.reset_seconds > 0 else ValidationPhase.PREPARE
+
     def _begin_phase(self) -> None:
         self._phase_elapsed = 0.0
 
@@ -230,6 +275,10 @@ class ValidationRunner:
         sample["scenario_elapsed_seconds"] = round(scenario_elapsed, 3)
         # test_view is the run identity; active_view may drift during turns.
         sample["test_view"] = {"id": self.test_view_id, "name": self.test_view_name}
+        sample["active_view_changed"] = (
+            self._last_active_view_id is not None and active_view_id != self._last_active_view_id
+        )
+        self._last_active_view_id = active_view_id
         sample["cancelled"] = False
         return sample
 
@@ -239,14 +288,16 @@ class ValidationRunner:
             self.phase = ValidationPhase.COMPLETE
             self.scenario_index = self.scenario_count - 1
         else:
-            self.phase = ValidationPhase.PREPARE
-            self._begin_phase()
+            self._begin_scenario()
 
 
 def validation_overlay_lines(runner: ValidationRunner) -> list[str]:
     """Big on-camera instruction for the current phase (empty when idle)."""
     scenario = runner.scenario
     header = f"TEST V2 · {runner.scenario_index + 1}/{runner.scenario_count}"
+    if runner.phase is ValidationPhase.RESET:
+        seconds = max(1, int(round(runner.remaining_seconds + 0.5)))
+        return [header, "", "VOLVE A TU POSTURA NORMAL", "", f"Preparando siguiente prueba... {seconds}"]
     if runner.phase is ValidationPhase.PREPARE:
         seconds = max(1, int(round(runner.remaining_seconds + 0.5)))
         return [header, "", scenario.title.upper(), "", scenario.instruction, f"Comenzamos en {seconds}..."]
@@ -278,6 +329,7 @@ class ValidationSession:
         test_view_id: str | None,
         test_view_name: str,
         directory: Path,
+        reset_seconds: float = 0.0,
         open_fn: Callable[..., Any] = open,
     ) -> ValidationSession:
         directory.mkdir(parents=True, exist_ok=True)
@@ -294,6 +346,7 @@ class ValidationSession:
             run_id=run_id,
             test_view_id=test_view_id,
             test_view_name=test_view_name,
+            reset_seconds=reset_seconds,
             sample_sink=sink,
         )
         runner.start()
@@ -346,11 +399,34 @@ class ValidationSession:
 # -- report ----------------------------------------------------------------
 
 
-def _as_view_rows(snapshots: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+EFFECT_DISCLAIMER = (
+    "Effect is a within-metric separability indicator. "
+    "Do not compare effect magnitude directly across different metrics."
+)
+
+
+def _fold_torso_yaw(row: dict[str, Any]) -> None:
+    """Report torso_yaw in its readable (folded) form; JSONL keeps the raw value."""
+    view = row.get("view")
+    if isinstance(view, dict) and view.get("torso_yaw") is not None:
+        view["torso_yaw"] = torso_yaw_display(view["torso_yaw"])
+    observations = row.get("observations")
+    if isinstance(observations, dict):
+        payload = observations.get("torso_yaw")
+        if isinstance(payload, dict) and payload.get("value") is not None:
+            payload["value"] = torso_yaw_display(payload["value"])
+
+
+def _as_view_rows(
+    snapshots: Iterable[Mapping[str, Any]],
+    *,
+    include_legacy: bool = False,
+) -> list[dict[str, Any]]:
     """Rewrap validation snapshots so the analyzer groups by ``test_view``.
 
     The scenario label stays; the run's ``test_view`` replaces the changing
-    ``active_view`` as the grouping identity.
+    ``active_view`` as the grouping identity. Legacy V1 metrics are dropped
+    unless ``include_legacy`` is set, and torso_yaw is shown folded.
     """
     rows: list[dict[str, Any]] = []
     for snap in snapshots:
@@ -361,8 +437,45 @@ def _as_view_rows(snapshots: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]
             "id": view.get("id"),
             "name": view.get("name") or "unknown",
         }
+        if not include_legacy:
+            row["metrics"] = {}
+            row["confidence"] = {}
+        _fold_torso_yaw(row)
         rows.append(row)
     return rows
+
+
+def _active_view_change_lines(snapshots: Sequence[Mapping[str, Any]]) -> list[str]:
+    total = sum(1 for snap in snapshots if snap.get("active_view_changed"))
+    lines = [f"active view changes during run: {total}"]
+    per_scenario: dict[str, int] = {}
+    for snap in snapshots:
+        if snap.get("active_view_changed"):
+            scenario = str(snap.get("scenario") or "?")
+            per_scenario[scenario] = per_scenario.get(scenario, 0) + 1
+    for scenario in sorted(per_scenario):
+        lines.append(f"  {scenario:<24} {per_scenario[scenario]}")
+    return lines
+
+
+def _lateralization_lines(comparison: Mapping[str, Any]) -> list[str]:
+    """LEFT == LEFT / RIGHT == RIGHT sanity: which side moves for each shoulder test."""
+    lines: list[str] = []
+    tests = ("shoulder_left_up", "shoulder_right_up", "shoulders_up")
+    for label in sorted(comparison):
+        scenario = str(label).split(" @ ", 1)[0]
+        if scenario not in tests:
+            continue
+        entry = comparison[label]
+        metrics = entry.metrics
+        left = metrics.get("left_shoulder_elevation")
+        right = metrics.get("right_shoulder_elevation")
+        lines.append(f"  [{label}]")
+        if left is not None:
+            lines.append(f"    left_shoulder_elevation   delta {left['delta']:+.3f}")
+        if right is not None:
+            lines.append(f"    right_shoulder_elevation  delta {right['delta']:+.3f}")
+    return lines
 
 
 def build_validation_report(
@@ -371,10 +484,12 @@ def build_validation_report(
     *,
     test_view_name: str = "",
     baseline_scenario: str = DEFAULT_BASELINE_SCENARIO,
+    include_legacy: bool = False,
 ) -> str:
     """Data-only report: no PASS/FAIL, no automatic verdict.
 
     Reuses the snapshot analyzer; the run's test view is the baseline identity.
+    Standard output is V2-only; pass ``include_legacy`` for the V1 diagnostics.
     """
     lines = [
         "Reporte de validacion V2",
@@ -382,13 +497,14 @@ def build_validation_report(
         f"vista de test: {test_view_name or '-'}",
         f"escenario baseline: {baseline_scenario}",
         f"muestras: {len(snapshots)}",
+        f"metricas: {'V2 + legacy' if include_legacy else 'V2 only'}",
         "",
     ]
     if not snapshots:
         lines.append("No hay muestras en esta corrida.")
         return "\n".join(lines)
 
-    summary = summarize_snapshots(_as_view_rows(snapshots), group_by_view=True)
+    summary = summarize_snapshots(_as_view_rows(snapshots, include_legacy=include_legacy), group_by_view=True)
     lines.append("Resumen por escenario @ vista (test_view):")
     lines.append(format_summary(summary))
 
@@ -405,10 +521,99 @@ def build_validation_report(
         lines.append(f"Comparacion por vista contra '{baseline_scenario}' de la misma vista:")
         lines.append(format_view_comparison(comparison))
         lines.append("")
+        lines.append(f"({EFFECT_DISCLAIMER})")
+        lines.append("")
         lines.append("Matriz de respuesta por escenario (efecto por metrica; ojo cross-talk):")
         lines.append(format_response_matrix(metric_response_matrix(comparison)))
+        lines.append("")
+        lines.append("Lateralization check (verifica LEFT == LEFT, RIGHT == RIGHT):")
+        lateral = _lateralization_lines(comparison)
+        lines.extend(lateral or ["  (sin escenarios de hombros en esta corrida)"])
     else:
         lines.append("")
         lines.append(f"Sin baseline '{baseline_scenario}' para la vista de test.")
 
+    lines.append("")
+    lines.extend(_active_view_change_lines(snapshots))
+    return "\n".join(lines)
+
+
+# -- cross-run comparison --------------------------------------------------
+
+
+def _run_summary(snapshots: Sequence[Mapping[str, Any]], include_legacy: bool):
+    return summarize_snapshots(_as_view_rows(snapshots, include_legacy=include_legacy), group_by_view=True)
+
+
+def build_run_comparison(
+    run_a_id: str,
+    snapshots_a: Sequence[Mapping[str, Any]],
+    run_b_id: str,
+    snapshots_b: Sequence[Mapping[str, Any]],
+    *,
+    baseline_scenario: str = DEFAULT_BASELINE_SCENARIO,
+    include_legacy: bool = False,
+) -> str:
+    """Compare two runs: baseline reproducibility and response reproducibility.
+
+    Response (delta scenario-baseline) matters more than absolute values.
+    """
+    summary_a = _run_summary(snapshots_a, include_legacy)
+    summary_b = _run_summary(snapshots_b, include_legacy)
+    lines = [
+        f"Comparacion de runs: {run_a_id} vs {run_b_id}",
+        f"baseline: {baseline_scenario}",
+        "",
+        "Reproducibilidad de baseline (mediana A vs B):",
+    ]
+    for label in sorted(summary_a):
+        if label.split(" @ ", 1)[0] != baseline_scenario or label not in summary_b:
+            continue
+        lines.append(f"  [{label}]")
+        for name in sorted(set(summary_a[label]) & set(summary_b[label])):
+            a = summary_a[label][name]
+            b = summary_b[label][name]
+            lines.append(
+                f"    {name:<24} A {a.median:+.3f}  B {b.median:+.3f}  d {b.median - a.median:+.3f}  "
+                f"covA {a.coverage:.0%}({a.count}/{a.total})  covB {b.coverage:.0%}({b.count}/{b.total})"
+            )
+
+    comparison_a = compare_to_view_baselines(summary_a, baseline_scenario)
+    comparison_b = compare_to_view_baselines(summary_b, baseline_scenario)
+    lines.append("")
+    lines.append("Reproducibilidad de respuesta (delta escenario - baseline):")
+    for label in sorted(comparison_a):
+        if label not in comparison_b:
+            continue
+        rows_a = comparison_a[label].metrics
+        rows_b = comparison_b[label].metrics
+        lines.append(f"  [{label}]")
+        for name in sorted(set(rows_a) & set(rows_b)):
+            da = rows_a[name]["delta"]
+            db = rows_b[name]["delta"]
+            lines.append(f"    {name:<24} deltaA {da:+.3f}  deltaB {db:+.3f}  d {db - da:+.3f}")
+    return "\n".join(lines)
+
+
+def build_view_difference(
+    snapshots: Sequence[Mapping[str, Any]],
+    *,
+    scenario: str = DEFAULT_BASELINE_SCENARIO,
+    include_legacy: bool = False,
+) -> str:
+    """Per-metric medians for one scenario across every view in a run."""
+    summary = _run_summary(snapshots, include_legacy)
+    labels = [label for label in summary if label.split(" @ ", 1)[0] == scenario]
+    lines = [f"Diferencia entre vistas para '{scenario}' (mediana por vista):"]
+    if not labels:
+        lines.append("  (sin datos)")
+        return "\n".join(lines)
+    for label in sorted(labels):
+        lines.append(f"  [{label}]")
+        for name in sorted(summary[label]):
+            stats = summary[label][name]
+            lines.append(
+                f"    {name:<24} median {stats.median:+.3f}  "
+                f"cov {stats.coverage:.0%} ({stats.count}/{stats.total})  conf {stats.confidence:.0%}"
+            )
     return "\n".join(lines)

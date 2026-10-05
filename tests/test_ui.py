@@ -80,6 +80,15 @@ class DrawGuidesTests(unittest.TestCase):
         draw_guides(image, metrics, 0.55)
         self.assertGreater(int(image.sum()), 0)
 
+    def test_mirror_flag_draws_on_the_flipped_side(self) -> None:
+        metrics = metrics_with({"nose": DebugLandmark(0.2, 0.5, 0.9)})
+        image = frame()
+        draw_guides(image, metrics, 0.55, mirror=True)
+        left_half = int(image[:, :80, :].sum())
+        right_half = int(image[:, 80:, :].sum())
+        self.assertEqual(left_half, 0)
+        self.assertGreater(right_half, 0)
+
     def test_none_metrics_is_safe(self) -> None:
         image = frame()
         draw_guides(image, None)

@@ -48,6 +48,34 @@ GUIDE_SEGMENTS: tuple[tuple[str, str, tuple[int, int, int], int], ...] = (
 )
 
 
+# Landmarks whose anatomical side is worth labelling on the overlay so a wrong
+# mirroring is visible immediately.
+LATERAL_LANDMARKS = frozenset({"left_shoulder", "right_shoulder", "left_ear", "right_ear"})
+
+
+def laterality_label(name: str) -> str:
+    """Anatomical L/R label for a landmark name (from the model, not the screen)."""
+    if name.startswith("left"):
+        return "L"
+    if name.startswith("right"):
+        return "R"
+    return ""
+
+
+def display_x(raw_x: float, mirror: bool) -> float:
+    """Map a model x (raw frame) to the display x when the UI is mirrored.
+
+    MediaPipe works on the raw frame; the on-screen preview is flipped for the
+    user, so only rendering flips x. y is untouched.
+    """
+    return 1.0 - raw_x if mirror else raw_x
+
+
+def display_point(raw_x: float, raw_y: float, mirror: bool) -> tuple[float, float]:
+    """Display coordinates for a raw model point; only x may flip."""
+    return display_x(raw_x, mirror), raw_y
+
+
 def landmark_color(name: str) -> tuple[int, int, int]:
     if name in FACE_LANDMARKS:
         return FACE_COLOR
