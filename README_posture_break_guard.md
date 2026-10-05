@@ -50,6 +50,11 @@ posture_guard/
   detection.py      ← landmarks + métricas + clasificación
   alerts.py         ← pausas
   notifications.py  ← notificaciones nativas + sonido
+  storage.py        ← SQLite: analytics, migraciones y recuperación
+  paths.py          ← datos de usuario (AppData) y recursos
+  logging_setup.py  ← logging rotativo a archivo
+  camera.py         ← apertura de cámara con retry/backoff
+  single_instance.py← instancia única (mutex de Windows)
   state.py          ← estado compartido entre threads
   ui.py             ← overlay, tray, helpers de dibujo
   dashboard.py      ← interfaz principal (CustomTkinter)
@@ -112,6 +117,14 @@ Carpeta `history/` con un JSON por día:
 - Racha de días consecutivos con score ≥ 70%
 - Alertas y pausas completadas
 - Log de eventos con hora
+
+## Privacidad y datos
+
+Todo el procesamiento es **local**: las imágenes de la cámara no se almacenan ni se transmiten. La base guarda solo métricas, scores y eventos.
+
+Corriendo desde el código, los datos quedan en la carpeta del proyecto. Empaquetado (`.exe`), se guardan en `%LOCALAPPDATA%\PostureBreaker\` (config, calibración, base de datos y logs), para que funcione aunque se instale en `Program Files`; los recursos (modelo) quedan junto al ejecutable.
+
+Log rotativo en `logs/posturebreaker.log` (5 MB, 3 backups). La app es single-instance.
 
 ## Ajustes
 
