@@ -8,6 +8,7 @@ description = "Monitor de postura local con webcam, pausas y analytics."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Ivan Fibiger" }]
+license = { text = "MIT" }
 dependencies = [
     "mediapipe==0.10.33",
     "opencv-contrib-python==4.13.0.92",

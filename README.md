@@ -106,4 +106,4 @@ GitHub Actions corre lint (Ruff) + tests en Ubuntu y Windows (Python 3.11/3.12).
 
 ## Licencia
 
-A definir.
+[MIT](LICENSE) © 2026 Ivan Fibiger.
