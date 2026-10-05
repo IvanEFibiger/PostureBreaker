@@ -19,6 +19,19 @@ class MetricObservation:
     confidence: float
 
 
+@dataclass(frozen=True)
+class DebugLandmark:
+    """A 2D landmark kept with its confidence for the debug overlay.
+
+    Confidence is preserved so the renderer (not the detector) decides whether
+    the point is reliable enough to draw.
+    """
+
+    x: float
+    y: float
+    confidence: float
+
+
 @dataclass
 class MetricBaseline:
     center: float
@@ -229,6 +242,9 @@ class DetectionMetrics:
     shoulders: ShoulderState | None = None
     forward: ForwardState | None = None
     observations: dict[str, MetricObservation] = field(default_factory=dict)
+    # Both-sides 2D landmarks for the V2 debug overlay (legacy ``points`` only
+    # carries the selected side). Debug-only: never feeds metrics or risk.
+    debug_landmarks: dict[str, DebugLandmark] = field(default_factory=dict)
 
 
 @dataclass

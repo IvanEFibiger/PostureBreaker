@@ -6,6 +6,7 @@ from typing import Any
 
 import cv2
 
+from .guides import landmark_color, planned_segments, visible_landmarks
 from .models import DetectionMetrics
 
 
@@ -290,10 +291,21 @@ def draw_text_block(
         )
 
 
-def draw_guides(frame: Any, metrics: DetectionMetrics | None) -> None:
-    if not metrics:
-        return
+def _draw_v2_guides(frame: Any, metrics: DetectionMetrics, min_visibility: float) -> None:
+    h, w = frame.shape[:2]
+    visible = visible_landmarks(metrics.debug_landmarks, min_visibility)
 
+    px_points: dict[str, tuple[int, int]] = {}
+    for name, landmark in visible.items():
+        point = (int(landmark.x * w), int(landmark.y * h))
+        px_points[name] = point
+        cv2.circle(frame, point, 4, landmark_color(name), -1)
+
+    for a, b, color, thickness in planned_segments(set(px_points)):
+        cv2.line(frame, px_points[a], px_points[b], color, thickness)
+
+
+def _draw_legacy_guides(frame: Any, metrics: DetectionMetrics) -> None:
     h, w = frame.shape[:2]
     colors = {
         "ear": (0, 255, 255),
@@ -313,5 +325,20 @@ def draw_guides(frame: Any, metrics: DetectionMetrics | None) -> None:
         cv2.line(frame, px_points["ear"], px_points["shoulder"], (0, 255, 255), 2)
         cv2.line(frame, px_points["shoulder"], px_points["hip"], (255, 200, 0), 2)
         cv2.line(frame, px_points["nose"], px_points["shoulder"], (255, 0, 255), 1)
+
+
+def draw_guides(frame: Any, metrics: DetectionMetrics | None, min_visibility: float = 0.0) -> None:
+    """Draw the V2 landmark overlay, falling back to the legacy points.
+
+    Legacy ``metrics.points`` only carries the selected side; the V2 debug
+    landmarks carry both sides plus optional body points, so the desk battery
+    can be verified visually.
+    """
+    if not metrics:
+        return
+    if metrics.debug_landmarks:
+        _draw_v2_guides(frame, metrics, min_visibility)
+    else:
+        _draw_legacy_guides(frame, metrics)
 
 

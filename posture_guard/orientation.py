@@ -172,6 +172,19 @@ def estimate_torso_yaw(body: BodyLandmarks, min_visibility: float = 0.0) -> tupl
     return angle_degrees(dx, dz), confidence
 
 
+def torso_yaw_display(raw_yaw: float | None) -> float | None:
+    """Human-readable torso yaw around a frontal reference, for debug ONLY.
+
+    The raw value is the directed angle of the 3D shoulder line and can sit near
+    +/-180 even when the user faces the camera. Folding the undirected line to
+    (-90, 90] puts frontal near 0 with no wrap jump. This never replaces the raw
+    ``torso_yaw`` used by ViewSelector, calibration or baselines.
+    """
+    if raw_yaw is None:
+        return None
+    return normalize_line_angle(raw_yaw)
+
+
 def estimate_torso_lateral_lean(body: BodyLandmarks, min_visibility: float = 0.0) -> tuple[float | None, float]:
     """Lateral lean of the shoulder-hip axis, in degrees from vertical.
 

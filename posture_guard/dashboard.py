@@ -203,7 +203,7 @@ class Dashboard(ctk.CTk):
 
         self._issue_frame = ctk.CTkFrame(host, fg_color=CARD_COLOR, corner_radius=16)
         self._issue_frame.grid(row=4, column=0, sticky="ew", padx=24, pady=(2, 8))
-        ctk.CTkLabel(self._issue_frame, text="Correccion actual", font=("Segoe UI", 12, "bold"), text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(14, 0))
+        ctk.CTkLabel(self._issue_frame, text="Correccion actual (V1)", font=("Segoe UI", 12, "bold"), text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(14, 0))
         self._issue_title = ctk.CTkLabel(self._issue_frame, text="Esperando postura...", font=("Segoe UI", 20, "bold"), text_color=TEXT_PRIMARY)
         self._issue_title.pack(anchor="w", padx=16, pady=(2, 0))
         self._issue_body = ctk.CTkLabel(

@@ -7,9 +7,10 @@ from typing import Any
 from .config import Config
 from .forward import aggregate_forward, estimate_forward_state
 from .geometry import visibility_confidence
-from .landmarks import extract_body_landmarks
+from .guides import DEBUG_LANDMARK_NAMES
+from .landmarks import BodyLandmarks, extract_body_landmarks
 from .metrics import attach_neck_roll_delta, build_observations
-from .models import CalibrationProfile, DetectionMetrics
+from .models import CalibrationProfile, DebugLandmark, DetectionMetrics
 from .orientation import aggregate_view, estimate_view_state
 from .risk import metric_severity
 from .shoulders import aggregate_shoulders, estimate_shoulder_state
@@ -82,6 +83,39 @@ def choose_side(landmarks: list[Any], min_visibility: float) -> str | None:
     return max(scored, key=lambda item: item[1])[0]
 
 
+def build_debug_landmarks(body: BodyLandmarks | None) -> dict[str, DebugLandmark]:
+    """Collect both-sides 2D landmarks with their confidence for the overlay.
+
+    All relevant landmarks are kept (including low-confidence hips); the
+    renderer filters by ``min_visibility`` so nothing is inferred or hidden too
+    early.
+    """
+    if body is None:
+        return {}
+    debug: dict[str, DebugLandmark] = {}
+    for name in DEBUG_LANDMARK_NAMES:
+        point = body.image.get(name)
+        if point is not None:
+            debug[name] = DebugLandmark(point.x, point.y, point.visibility)
+    return debug
+
+
+def _aggregate_debug_landmarks(items: list[DetectionMetrics]) -> dict[str, DebugLandmark]:
+    """Average the window's debug landmarks so the overlay matches the smoothing."""
+    names = sorted(set().union(*(item.debug_landmarks.keys() for item in items)))
+    aggregated: dict[str, DebugLandmark] = {}
+    for name in names:
+        marks = [item.debug_landmarks[name] for item in items if name in item.debug_landmarks]
+        if not marks:
+            continue
+        aggregated[name] = DebugLandmark(
+            x=statistics.fmean(mark.x for mark in marks),
+            y=statistics.fmean(mark.y for mark in marks),
+            confidence=statistics.fmean(mark.confidence for mark in marks),
+        )
+    return aggregated
+
+
 def extract_metrics(result: Any, config: Config, preferred_side: str | None = None) -> DetectionMetrics | None:
     if not result.pose_landmarks:
         return None
@@ -147,6 +181,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         shoulders=shoulders,
         forward=forward,
         observations=build_observations(view, shoulders, forward),
+        debug_landmarks=build_debug_landmarks(body),
     )
 
 
@@ -213,6 +248,7 @@ class RollingMetrics:
             shoulders=shoulders,
             forward=forward,
             observations=build_observations(view, shoulders, forward),
+            debug_landmarks=_aggregate_debug_landmarks(filtered),
         )
 
 

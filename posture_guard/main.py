@@ -21,6 +21,8 @@ from .debug import (
     append_snapshot,
     build_snapshot,
     format_debug_lines,
+    format_v1_status_lines,
+    format_v2_status_lines,
     label_for_digit,
     next_snapshot_label,
 )
@@ -756,12 +758,12 @@ def _camera_worker(
                     last_refresh_at = now_ts
 
                 if show_camera:
-                    draw_guides(frame, metrics)
+                    draw_guides(frame, metrics, config.min_visibility)
                     side_text = profile.side if profile else "sin calibrar"
                     info_lines = [
                         f"Lado: {metrics.side if metrics else '-'} | Cal: {side_text}",
-                        f"Score: {store.score:.0f}%",
-                        f"Issue: {result.issue_label or '-'}",
+                        f"Score (V1): {store.score:.0f}%",
+                        *format_v1_status_lines(result.issue_label, result.posture_bad),
                         (
                             "Modo foco ON"
                             if result.focus_mode
@@ -773,6 +775,12 @@ def _camera_worker(
                         current_label = shared.pending_snapshot_label
                     debug_lines = [
                         f"SNAP {current_label}",
+                        *format_v2_status_lines(
+                            config.posture_v2_observe_only,
+                            result.risk_score,
+                            result.dominant_issue,
+                            result.dominant_issue_label,
+                        ),
                         *format_debug_lines(metrics, config.metric_min_confidence),
                     ]
                     draw_text_block(

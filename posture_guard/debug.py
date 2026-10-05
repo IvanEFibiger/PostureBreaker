@@ -5,11 +5,19 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .metrics import field_confidence
 from .models import DetectionMetrics, ForwardState, ShoulderState, ViewState
+from .orientation import torso_yaw_display
 
 STATE_OK = "ok"
 STATE_LOW = "low"
 STATE_MISSING = "missing"
+
+# Overlay status headers: V1 is the productive classifier, V2 is observe-only
+# until it is deliberately activated.
+V1_HEADER = "V1 PRODUCTIVE"
+V2_OBSERVE_HEADER = "V2 OBSERVE ONLY"
+V2_ACTIVE_HEADER = "V2 ACTIVE"
 
 # cv2's Hershey fonts cannot render unicode, so keep the symbols ASCII.
 _STATE_SYMBOLS = {STATE_OK: "ok", STATE_LOW: "?", STATE_MISSING: "--"}
@@ -77,47 +85,97 @@ def _format_line(name: str, value: float | None, confidence: float, min_confiden
     return f"  {name:<9} {value:+7.2f} {symbol}"
 
 
+def format_v1_status_lines(issue_label: str, posture_bad: bool) -> list[str]:
+    """V1 is the productive classifier; label it explicitly for the overlay."""
+    return [
+        V1_HEADER,
+        f"  V1 Issue: {issue_label or '-'}",
+        f"  bad      {'yes' if posture_bad else 'no'}",
+    ]
+
+
+def format_v2_status_lines(
+    observe_only: bool,
+    risk_score: float,
+    dominant_issue: str | None,
+    candidate_label: str = "",
+) -> list[str]:
+    """V2 is observe-only until activated; never present it as an active fix."""
+    header = V2_OBSERVE_HEADER if observe_only else V2_ACTIVE_HEADER
+    candidate = candidate_label or dominant_issue or "-"
+    return [
+        header,
+        f"  risk     {risk_score:.2f}",
+        f"  V2 Candidate: {candidate}",
+    ]
+
+
 def format_debug_lines(metrics: DetectionMetrics | None, min_confidence: float = 0.0) -> list[str]:
-    """Observation-only overlay block for the camera window."""
+    """Observation-only overlay block for the camera window.
+
+    Each signal's ok/?/-- state uses its OWN per-field confidence (via
+    ``field_confidence``), never the state-wide average, so a reliable head roll
+    still reads "ok" while a noisy torso yaw reads "?" in the same frame.
+    ``torso yaw`` shows the folded display value; the raw value is untouched.
+    """
     if metrics is None:
         return ["DEBUG: sin pose"]
 
     view = metrics.view
     shoulders = metrics.shoulders
     forward = metrics.forward
-    view_confidence = view.confidence if view else 0.0
-    shoulder_confidence = shoulders.confidence if shoulders else 0.0
-    forward_confidence = forward.confidence if forward else 0.0
 
     def view_value(name: str) -> float | None:
         return getattr(view, name) if view else None
 
+    def view_conf(name: str) -> float:
+        return field_confidence(view, name) if view else 0.0
+
     def shoulder_value(name: str) -> float | None:
         return getattr(shoulders, name) if shoulders else None
+
+    def shoulder_conf(name: str) -> float:
+        return field_confidence(shoulders, name) if shoulders else 0.0
 
     def forward_value(name: str) -> float | None:
         return getattr(forward, name) if forward else None
 
+    def forward_conf(name: str) -> float:
+        return field_confidence(forward, name) if forward else 0.0
+
     orientation = view.orientation if view else "unknown"
+    view_confidence = view.confidence if view else 0.0
     lines = [f"VIEW {orientation} conf {view_confidence:.0%}"]
     lines.append("HEAD")
-    lines.append(_format_line("yaw", view_value("head_yaw"), view_confidence, min_confidence))
-    lines.append(_format_line("pitch", view_value("head_pitch"), view_confidence, min_confidence))
-    lines.append(_format_line("roll", view_value("head_roll"), view_confidence, min_confidence))
+    lines.append(_format_line("yaw", view_value("head_yaw"), view_conf("head_yaw"), min_confidence))
+    lines.append(_format_line("pitch", view_value("head_pitch"), view_conf("head_pitch"), min_confidence))
+    lines.append(_format_line("roll", view_value("head_roll"), view_conf("head_roll"), min_confidence))
     lines.append("TORSO")
-    lines.append(_format_line("yaw", view_value("torso_yaw"), view_confidence, min_confidence))
-    lines.append(_format_line("lean", view_value("torso_lateral_lean"), view_confidence, min_confidence))
+    lines.append(
+        _format_line("yaw", torso_yaw_display(view_value("torso_yaw")), view_conf("torso_yaw"), min_confidence)
+    )
+    lines.append(
+        _format_line("lean", view_value("torso_lateral_lean"), view_conf("torso_lateral_lean"), min_confidence)
+    )
     lines.append("RELATIVE")
-    lines.append(_format_line("neck roll", view_value("neck_roll_delta"), view_confidence, min_confidence))
+    lines.append(_format_line("neck roll", view_value("neck_roll_delta"), view_conf("neck_roll_delta"), min_confidence))
     lines.append("SHOULDERS")
-    lines.append(_format_line("roll", shoulder_value("roll"), shoulder_confidence, min_confidence))
-    lines.append(_format_line("L elev", shoulder_value("left_elevation"), shoulder_confidence, min_confidence))
-    lines.append(_format_line("R elev", shoulder_value("right_elevation"), shoulder_confidence, min_confidence))
-    lines.append(_format_line("elev", shoulder_value("elevation"), shoulder_confidence, min_confidence))
+    lines.append(_format_line("roll", shoulder_value("roll"), shoulder_conf("roll"), min_confidence))
+    lines.append(_format_line("L elev", shoulder_value("left_elevation"), shoulder_conf("left_elevation"), min_confidence))
+    lines.append(
+        _format_line("R elev", shoulder_value("right_elevation"), shoulder_conf("right_elevation"), min_confidence)
+    )
+    lines.append(_format_line("elev", shoulder_value("elevation"), shoulder_conf("elevation"), min_confidence))
     lines.append("FORWARD")
-    lines.append(_format_line("head", forward_value("head_forward_ratio"), forward_confidence, min_confidence))
-    lines.append(_format_line("depth", forward_value("head_depth_ratio"), forward_confidence, min_confidence))
-    lines.append(_format_line("torso", forward_value("torso_forward_angle"), forward_confidence, min_confidence))
+    lines.append(
+        _format_line("head", forward_value("head_forward_ratio"), forward_conf("head_forward_ratio"), min_confidence)
+    )
+    lines.append(
+        _format_line("depth", forward_value("head_depth_ratio"), forward_conf("head_depth_ratio"), min_confidence)
+    )
+    lines.append(
+        _format_line("torso", forward_value("torso_forward_angle"), forward_conf("torso_forward_angle"), min_confidence)
+    )
     return lines
 
 

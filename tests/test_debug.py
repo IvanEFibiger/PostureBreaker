@@ -12,9 +12,14 @@ from posture_guard.debug import (
     STATE_LOW,
     STATE_MISSING,
     STATE_OK,
+    V1_HEADER,
+    V2_ACTIVE_HEADER,
+    V2_OBSERVE_HEADER,
     append_snapshot,
     build_snapshot,
     format_debug_lines,
+    format_v1_status_lines,
+    format_v2_status_lines,
     label_for_digit,
     metric_state,
     next_snapshot_label,
@@ -108,6 +113,49 @@ class FormatDebugLinesTests(unittest.TestCase):
         self.assertIn("yaw", text)
         self.assertIn("--", text)  # missing
         self.assertIn("?", text)  # low confidence
+
+
+class StatusHeaderTests(unittest.TestCase):
+    def test_v1_block_is_explicit(self) -> None:
+        lines = format_v1_status_lines("Cuello empujado", posture_bad=True)
+        text = "\n".join(lines)
+        self.assertIn(V1_HEADER, text)
+        self.assertIn("V1 Issue: Cuello empujado", text)
+        self.assertIn("yes", text)
+
+    def test_v2_observe_only_header(self) -> None:
+        lines = format_v2_status_lines(True, risk_score=1.42, dominant_issue="head_forward", candidate_label="Cabeza adelantada")
+        text = "\n".join(lines)
+        self.assertIn(V2_OBSERVE_HEADER, text)
+        self.assertIn("V2 Candidate: Cabeza adelantada", text)
+        self.assertIn("1.42", text)
+        self.assertNotIn(V2_ACTIVE_HEADER, text)
+
+    def test_v2_active_header_when_activated(self) -> None:
+        lines = format_v2_status_lines(False, risk_score=0.0, dominant_issue=None)
+        text = "\n".join(lines)
+        self.assertIn(V2_ACTIVE_HEADER, text)
+        self.assertNotIn(V2_OBSERVE_HEADER, text)
+        self.assertIn("V2 Candidate: -", text)
+
+
+class PerMetricConfidenceTests(unittest.TestCase):
+    def test_state_follows_each_field_confidence_not_the_average(self) -> None:
+        metrics = make_metrics()
+        metrics.view.confidence = 0.90
+        metrics.view.confidences = {"head_roll": 0.95, "torso_yaw": 0.30}
+        lines = format_debug_lines(metrics, min_confidence=0.6)
+
+        head_roll_line = next(line for line in lines if "+0.01" in line)
+        torso_yaw_line = next(line for line in lines if "+0.07" in line)
+        self.assertIn(STATE_OK, head_roll_line)  # "ok"
+        self.assertIn("?", torso_yaw_line)  # low-confidence symbol
+
+    def test_torso_yaw_shows_the_folded_display_value(self) -> None:
+        metrics = make_metrics()
+        metrics.view.torso_yaw = 141.5
+        lines = format_debug_lines(metrics, min_confidence=0.6)
+        self.assertTrue(any("-38.50" in line for line in lines))
 
 
 class BuildSnapshotTests(unittest.TestCase):

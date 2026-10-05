@@ -5,6 +5,7 @@ import unittest
 from posture_guard.config import Config
 from posture_guard.detection import (
     RollingMetrics,
+    build_debug_landmarks,
     classify_posture,
     dominant_issue,
     extract_metrics,
@@ -322,6 +323,56 @@ class ExtractMetricsTests(unittest.TestCase):
         self.assertIn("head_roll", metrics.observations)
         self.assertIn("shoulder_roll", metrics.observations)
         self.assertIn("head_depth_ratio", metrics.observations)
+
+    def test_debug_landmarks_include_face_and_both_shoulders(self) -> None:
+        landmarks = make_landmarks()
+        landmarks[0] = _Landmark(0.5, 0.52)  # nose
+        landmarks[2] = _Landmark(0.45, 0.5)  # left_eye
+        landmarks[5] = _Landmark(0.55, 0.5)  # right_eye
+        landmarks[7] = _Landmark(0.35, 0.5)  # left_ear
+        landmarks[8] = _Landmark(0.65, 0.5)  # right_ear
+        landmarks[9] = _Landmark(0.47, 0.56)  # left_mouth
+        landmarks[10] = _Landmark(0.53, 0.56)  # right_mouth
+        landmarks[11] = _Landmark(0.4, 0.6)  # left_shoulder
+        landmarks[12] = _Landmark(0.6, 0.6)  # right_shoulder
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        for name in (
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_mouth",
+            "right_mouth",
+            "left_shoulder",
+            "right_shoulder",
+        ):
+            self.assertIn(name, metrics.debug_landmarks)
+
+    def test_low_visibility_hip_is_kept_with_its_confidence(self) -> None:
+        landmarks = make_landmarks()
+        landmarks[23].visibility = 0.1  # left_hip below the desk
+        metrics = extract_metrics(_Result(landmarks), Config(), preferred_side="right")
+        self.assertIn("left_hip", metrics.debug_landmarks)
+        self.assertAlmostEqual(metrics.debug_landmarks["left_hip"].confidence, 0.1)
+
+    def test_build_debug_landmarks_without_body(self) -> None:
+        self.assertEqual(build_debug_landmarks(None), {})
+
+    def test_debug_landmarks_do_not_leak_into_observations(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertTrue(metrics.debug_landmarks)
+        self.assertNotIn("debug_landmarks", metrics.observations)
+
+    def test_rolling_mean_aggregates_debug_landmarks(self) -> None:
+        smoother = RollingMetrics(window_size=4)
+        first = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        second = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        smoother.append(first)
+        smoother.append(second)
+        mean = smoother.mean()
+        self.assertIn("left_shoulder", mean.debug_landmarks)
+        self.assertAlmostEqual(mean.debug_landmarks["left_shoulder"].confidence, 0.9)
 
     def test_view_state_is_attached(self) -> None:
         metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")

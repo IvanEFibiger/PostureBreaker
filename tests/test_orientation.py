@@ -15,6 +15,7 @@ from posture_guard.orientation import (
     estimate_torso_lateral_lean,
     estimate_torso_yaw,
     estimate_view_state,
+    torso_yaw_display,
 )
 
 
@@ -254,6 +255,29 @@ class TorsoYawTests(unittest.TestCase):
     def test_degenerate_shoulder_line_is_none(self) -> None:
         world = {"left_shoulder": p3(0.5, 0.5, 0.0), "right_shoulder": p3(0.5, 0.5, 0.0)}
         self.assertEqual(estimate_torso_yaw(body({}, world=world)), (None, 0.0))
+
+
+class TorsoYawDisplayTests(unittest.TestCase):
+    def test_none_stays_none(self) -> None:
+        self.assertIsNone(torso_yaw_display(None))
+
+    def test_frontal_reference_is_zero(self) -> None:
+        self.assertAlmostEqual(torso_yaw_display(0.0), 0.0)
+        self.assertAlmostEqual(torso_yaw_display(180.0), 0.0)
+        self.assertAlmostEqual(torso_yaw_display(-180.0), 0.0)
+
+    def test_folds_the_undirected_shoulder_line(self) -> None:
+        self.assertAlmostEqual(torso_yaw_display(141.5), -38.5)
+        self.assertAlmostEqual(torso_yaw_display(-141.5), 38.5)
+
+    def test_no_absurd_jump_near_the_wrap(self) -> None:
+        self.assertLess(abs(torso_yaw_display(179.9)), 1.0)
+        self.assertLess(abs(torso_yaw_display(-179.9)), 1.0)
+        self.assertLess(abs(torso_yaw_display(179.9) - torso_yaw_display(-179.9)), 1.0)
+
+    def test_stays_within_half_turn(self) -> None:
+        for raw in (-179.0, -90.0, -1.0, 0.0, 1.0, 90.0, 179.0):
+            self.assertLessEqual(abs(torso_yaw_display(raw)), 90.0)
 
 
 class TorsoLateralLeanTests(unittest.TestCase):
