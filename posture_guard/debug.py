@@ -14,13 +14,11 @@ STATE_MISSING = "missing"
 # cv2's Hershey fonts cannot render unicode, so keep the symbols ASCII.
 _STATE_SYMBOLS = {STATE_OK: "ok", STATE_LOW: "?", STATE_MISSING: "--"}
 
-# Number keys 1-9,0 jump to the first ten labels; "n"/"p" cycle through the rest.
-# Labels follow the controlled validation scenarios.
+# Scenario labels only: the camera is fixed and which monitor you look at is
+# INFERRED from the recorded orientation (head_yaw), never labeled by hand.
+# Number keys 1-9,0 jump to the first ten; "n"/"p" cycle through the rest.
 SNAPSHOT_LABELS: tuple[str, ...] = (
-    "monitor_1_good",
-    "monitor_2_good",
-    "monitor_1_good_A",
-    "monitor_1_good_B",
+    "good",
     "front_good",
     "head_forward",
     "torso_forward",
@@ -164,13 +162,20 @@ def build_snapshot(
     metrics: DetectionMetrics | None,
     label: str,
     timestamp: dt.datetime | None = None,
+    active_view_id: str | None = None,
+    active_view_name: str | None = None,
 ) -> dict[str, Any]:
-    """Privacy-friendly metric snapshot: no image, only geometry and label."""
+    """Privacy-friendly metric snapshot: no image, only geometry and label.
+
+    The monitor/view is not part of the label: it is recorded automatically from
+    the detected orientation and (when calibrated) the active view profile.
+    """
     moment = timestamp or dt.datetime.now()
     return {
         "timestamp": moment.isoformat(timespec="seconds"),
         "label": label,
         "side": metrics.side if metrics else None,
+        "active_view": {"id": active_view_id, "name": active_view_name},
         "view": _view_payload(metrics.view if metrics else None),
         "shoulders": _shoulders_payload(metrics.shoulders if metrics else None),
         "forward": _forward_payload(metrics.forward if metrics else None),

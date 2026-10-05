@@ -13,18 +13,20 @@ from posture_guard.dataset import (
 )
 
 DEFAULT_PATH = Path("history/debug_snapshots.jsonl")
-DEFAULT_BASELINE = "monitor_1_good"
 
 
 def main(argv: list[str]) -> int:
     path = Path(argv[1]) if len(argv) > 1 else DEFAULT_PATH
-    baseline_label = argv[2] if len(argv) > 2 else DEFAULT_BASELINE
     snapshots = load_snapshots(path)
     if not snapshots:
         print(f"No hay snapshots en {path}")
         return 1
 
-    summary = summarize_snapshots(snapshots)
+    # Group by scenario AND detected view, so "good @ left" vs "good @ right"
+    # separate automatically without any manual monitor labeling.
+    summary = summarize_snapshots(snapshots, group_by_view=True)
+    baseline_label = argv[2] if len(argv) > 2 else sorted(summary)[0]
+    print(f"Baseline: {baseline_label}\n")
     print(format_summary(summary))
 
     metric_names = sorted({name for stats in summary.values() for name in stats})

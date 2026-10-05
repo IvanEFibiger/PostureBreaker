@@ -95,10 +95,28 @@ def flatten_snapshot(snapshot: dict[str, Any]) -> dict[str, tuple[float, float]]
     return signals
 
 
-def summarize_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, dict[str, MetricStats]]:
+def snapshot_view(snapshot: dict[str, Any]) -> str:
+    """Detected view bucket for a snapshot: active profile name or orientation.
+
+    The monitor a snapshot belongs to is NEVER a manual label; it is inferred
+    from the recorded orientation / active view.
+    """
+    active_view = snapshot.get("active_view") or {}
+    if active_view.get("name"):
+        return str(active_view["name"])
+    view = snapshot.get("view") or {}
+    return str(view.get("orientation") or "unknown")
+
+
+def summarize_snapshots(
+    snapshots: list[dict[str, Any]],
+    group_by_view: bool = False,
+) -> dict[str, dict[str, MetricStats]]:
     by_label: dict[str, list[dict[str, tuple[float, float]]]] = {}
     for snapshot in snapshots:
         label = str(snapshot.get("label") or "unlabeled")
+        if group_by_view:
+            label = f"{label} @ {snapshot_view(snapshot)}"
         by_label.setdefault(label, []).append(flatten_snapshot(snapshot))
 
     summary: dict[str, dict[str, MetricStats]] = {}

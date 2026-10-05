@@ -46,9 +46,11 @@ class SnapshotLabelTests(unittest.TestCase):
     def test_labels_are_unique(self) -> None:
         self.assertEqual(len(SNAPSHOT_LABELS), len(set(SNAPSHOT_LABELS)))
 
-    def test_includes_reproducibility_and_scenarios(self) -> None:
-        for label in ("monitor_1_good_A", "monitor_1_good_B", "head_forward", "shoulders_up", "head_torso_turn"):
-            self.assertIn(label, SNAPSHOT_LABELS)
+    def test_labels_are_scenarios_not_monitors(self) -> None:
+        self.assertIn("good", SNAPSHOT_LABELS)
+        self.assertIn("head_forward", SNAPSHOT_LABELS)
+        self.assertIn("head_torso_turn", SNAPSHOT_LABELS)
+        self.assertFalse(any("monitor" in label for label in SNAPSHOT_LABELS))
 
     def test_digit_keys_map_to_first_ten(self) -> None:
         self.assertEqual(label_for_digit("1"), SNAPSHOT_LABELS[0])
@@ -111,6 +113,11 @@ class BuildSnapshotTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot["forward"]["torso_forward_angle"], 6.5)
         self.assertAlmostEqual(snapshot["observations"]["head_yaw"]["value"], 0.31)
         self.assertAlmostEqual(snapshot["metrics"]["ear_shoulder_dx"], 0.05)
+
+    def test_records_active_view_automatically(self) -> None:
+        snapshot = build_snapshot(make_metrics(), "good", active_view_id="view_1", active_view_name="Monitor 1")
+        self.assertEqual(snapshot["active_view"], {"id": "view_1", "name": "Monitor 1"})
+        self.assertEqual(snapshot["view"]["orientation"], "right")
 
     def test_none_metrics_is_safe(self) -> None:
         snapshot = build_snapshot(None, "manual")

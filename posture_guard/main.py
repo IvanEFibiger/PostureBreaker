@@ -627,7 +627,12 @@ def _camera_worker(
                     try:
                         append_snapshot(
                             _resolve_path(data_dir, config.debug_snapshot_path),
-                            build_snapshot(metrics, str(label)),
+                            build_snapshot(
+                                metrics,
+                                str(label),
+                                active_view_id=active_view_id,
+                                active_view_name=active_view.name if active_view else None,
+                            ),
                         )
                         shared.update(calibration_summary=f"Snapshot guardado: {label}")
                     except OSError:

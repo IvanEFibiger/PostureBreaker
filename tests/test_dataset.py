@@ -12,6 +12,7 @@ from posture_guard.dataset import (
     format_summary,
     load_snapshots,
     separability,
+    snapshot_view,
     summarize_snapshots,
 )
 
@@ -115,6 +116,25 @@ class SummarizeSnapshotsTests(unittest.TestCase):
         stats = summarize_snapshots(rows)["good"]["m"]
         self.assertAlmostEqual(stats.median, 3.0)
         self.assertAlmostEqual(stats.mad, 1.0)
+
+
+class SummarizeByViewTests(unittest.TestCase):
+    def test_group_by_view_separates_monitors(self) -> None:
+        rows = [
+            snapshot("good", view={"orientation": "left"}),
+            snapshot("good", view={"orientation": "right"}),
+        ]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        self.assertIn("good @ left", summary)
+        self.assertIn("good @ right", summary)
+
+    def test_active_view_name_takes_precedence(self) -> None:
+        rows = [snapshot("good", active_view={"id": "v1", "name": "Monitor 1"})]
+        summary = summarize_snapshots(rows, group_by_view=True)
+        self.assertIn("good @ Monitor 1", summary)
+
+    def test_snapshot_view_falls_back_to_unknown(self) -> None:
+        self.assertEqual(snapshot_view(snapshot("good")), "unknown")
 
 
 class BaselineComparisonTests(unittest.TestCase):
