@@ -173,6 +173,20 @@ class EstimateViewStateTests(unittest.TestCase):
         self.assertIsNone(state.torso_lateral_lean)
         self.assertIsNone(state.neck_roll_delta)
 
+    def test_per_metric_confidence_and_neck_roll_minimum(self) -> None:
+        image = face()
+        image.update(
+            {
+                "left_shoulder": p(0.4, 0.6),
+                "right_shoulder": p(0.6, 0.6),
+                "left_hip": p(0.4, 0.9, visibility=0.4),
+                "right_hip": p(0.6, 0.9, visibility=0.4),
+            }
+        )
+        state = estimate_view_state(body(image))
+        self.assertAlmostEqual(state.confidences["head_roll"], 0.9)
+        self.assertAlmostEqual(state.confidences["neck_roll_delta"], 0.4)
+
 
 class TorsoYawTests(unittest.TestCase):
     @staticmethod

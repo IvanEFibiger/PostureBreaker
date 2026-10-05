@@ -58,6 +58,20 @@ class HeadForwardRatioTests(unittest.TestCase):
             (None, 0.0),
         )
 
+    def test_left_side_sign_is_canonicalized(self) -> None:
+        image = {
+            "left_ear": p(0.55, 0.3),
+            "left_shoulder": p(0.6, 0.5),
+            "left_hip": p(0.6, 0.8),
+        }
+        value, _ = estimate_head_forward_ratio(body(image), "left", "left")
+        self.assertAlmostEqual(value, 0.05 / 0.3)
+
+    def test_left_side_torso_angle_is_canonicalized(self) -> None:
+        image = {"left_shoulder": p(0.5, 0.5), "left_hip": p(0.6, 0.8)}
+        value, _ = estimate_torso_forward_angle(body(image), "left")
+        self.assertGreater(value, 0.0)
+
 
 class TorsoForwardAngleTests(unittest.TestCase):
     def test_vertical_torso_is_zero(self) -> None:

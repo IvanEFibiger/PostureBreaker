@@ -73,12 +73,15 @@ class IssuePolicy:
     cooldown_seconds: float = 300.0
     weight: float = 1.0
     load_based: bool = False
+    load_threshold: float = 0.0
 
 
 # Initial policies (plan §69). Final values must come from real validation.
 ISSUE_POLICIES: dict[PostureIssue, IssuePolicy] = {
     PostureIssue.HEAD_FORWARD: IssuePolicy(threshold_seconds=20.0, weight=1.5),
-    PostureIssue.NECK_ROTATION: IssuePolicy(threshold_seconds=120.0, weight=1.2, load_based=True),
+    PostureIssue.NECK_ROTATION: IssuePolicy(
+        threshold_seconds=120.0, weight=1.2, load_based=True, load_threshold=10.0
+    ),
     PostureIssue.NECK_FLEXION: IssuePolicy(threshold_seconds=30.0, weight=1.0),
     PostureIssue.HEAD_TILT: IssuePolicy(threshold_seconds=30.0, weight=0.8),
     PostureIssue.SHOULDER_ELEVATION: IssuePolicy(threshold_seconds=30.0, weight=1.1),

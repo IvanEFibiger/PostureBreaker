@@ -205,6 +205,21 @@ class SnoozeTests(unittest.TestCase):
         self.assertIn(Event.POSTURE_LOAD_ALERT, result.events)
         self.assertGreater(result.dominant_issue_load, 0.0)
 
+    def test_load_based_needs_enough_accumulated_load(self) -> None:
+        profile = CalibrationProfile(
+            side="right",
+            good_mean={},
+            good_std={},
+            thresholds={"head_yaw": MetricThreshold(0.2, "directional", 1, 0.1, weight=1.2)},
+        )
+        engine = PostureEngine(make_config(posture_v2_observe_only=False, max_frame_gap_seconds=1000.0), profile)
+        mild = DetectionMetrics(side="right", values={"head_yaw": 0.3}, points={})
+        result = engine.update(mild, True, 5.0, 1000.0)
+        self.assertNotIn(Event.POSTURE_LOAD_ALERT, result.events)
+        strong = DetectionMetrics(side="right", values={"head_yaw": 4.1}, points={})
+        result = engine.update(strong, True, 5.0, 1005.0)
+        self.assertIn(Event.POSTURE_LOAD_ALERT, result.events)
+
     def test_v2_issue_recovery_event(self) -> None:
         engine = PostureEngine(make_config(posture_v2_observe_only=False), make_profile())
         engine.update(bad_metrics(), True, 1.0, 1000.0)

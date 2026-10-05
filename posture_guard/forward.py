@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 from .geometry import EPSILON, angle_from_vertical, distance_2d, visibility_confidence, weighted_average
 from .landmarks import BodyLandmarks
+from .metrics import mean_confidences
 from .models import ForwardState
 
 FORWARD_FIELDS = ("head_forward_ratio", "torso_forward_angle")
@@ -20,9 +21,10 @@ def estimate_head_forward_ratio(
     orientation: str,
     min_visibility: float = 0.0,
 ) -> tuple[float | None, float]:
-    """Signed ear-shoulder horizontal offset normalized by torso length.
+    """Canonical signed ear-shoulder offset normalized by torso length.
 
-    Only published for lateral views; calibration learns the sign per side.
+    The sign is normalized by side so ``HIGHER_IS_WORSE`` stays stable; only
+    published for lateral views. The exact inversion still needs camera validation.
     """
     if orientation not in LATERAL_ORIENTATIONS:
         return None, 0.0
@@ -40,7 +42,8 @@ def estimate_head_forward_ratio(
     torso_length = distance_2d(shoulder, hip)
     if torso_length < EPSILON:
         return None, 0.0
-    return (ear.x - shoulder.x) / torso_length, confidence
+    side_sign = 1.0 if side == "right" else -1.0
+    return ((ear.x - shoulder.x) / torso_length) * side_sign, confidence
 
 
 def estimate_torso_forward_angle(
@@ -48,7 +51,10 @@ def estimate_torso_forward_angle(
     side: str,
     min_visibility: float = 0.0,
 ) -> tuple[float | None, float]:
-    """Shoulder-hip axis angle from vertical, in degrees; sign is learned by calibration."""
+    """Canonical shoulder-hip axis angle from vertical, in degrees.
+
+    The sign is normalized by side; the exact inversion still needs camera validation.
+    """
     image = body.image
     names = (f"{side}_shoulder", f"{side}_hip")
     if any(name not in image for name in names):
@@ -63,7 +69,8 @@ def estimate_torso_forward_angle(
     dy = hip.y - shoulder.y
     if math.hypot(dx, dy) < EPSILON:
         return None, 0.0
-    return angle_from_vertical(dx, dy), confidence
+    side_sign = 1.0 if side == "right" else -1.0
+    return angle_from_vertical(dx, dy) * side_sign, confidence
 
 
 def estimate_forward_state(
@@ -75,15 +82,18 @@ def estimate_forward_state(
     head_forward, head_confidence = estimate_head_forward_ratio(body, side, orientation, min_visibility)
     torso_forward, torso_confidence = estimate_torso_forward_angle(body, side, min_visibility)
 
-    confidences = [
-        confidence
-        for value, confidence in ((head_forward, head_confidence), (torso_forward, torso_confidence))
-        if value is not None
-    ]
+    confidences: dict[str, float] = {}
+    if head_forward is not None:
+        confidences["head_forward_ratio"] = head_confidence
+    if torso_forward is not None:
+        confidences["torso_forward_angle"] = torso_confidence
+
+    present = list(confidences.values())
     return ForwardState(
         head_forward_ratio=head_forward,
         torso_forward_angle=torso_forward,
-        confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+        confidence=sum(present) / len(present) if present else 0.0,
+        confidences=confidences,
     )
 
 
@@ -99,4 +109,4 @@ def aggregate_forward(states: Iterable[ForwardState | None]) -> ForwardState | N
         values[field_name] = weighted_average(pairs) if pairs else None
 
     confidence = sum(state.confidence for state in present) / len(present)
-    return ForwardState(**values, confidence=confidence)
+    return ForwardState(**values, confidence=confidence, confidences=mean_confidences(present, FORWARD_FIELDS))

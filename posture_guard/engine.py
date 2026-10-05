@@ -181,8 +181,12 @@ class PostureEngine:
                 continue
             if not was_issue_active:
                 events.append(Event.ISSUE_STARTED)
+            if policy.load_based:
+                should_alert = policy.load_threshold > 0 and self.issue_loads.get(key, 0.0) >= policy.load_threshold
+            else:
+                should_alert = self.issue_streaks[key] >= policy.threshold_seconds
             last_alert = self._issue_alert_at.get(key, 0.0)
-            if self.issue_streaks[key] >= policy.threshold_seconds and now - last_alert >= policy.cooldown_seconds:
+            if should_alert and now - last_alert >= policy.cooldown_seconds:
                 self._issue_alert_at[key] = now
                 events.append(Event.POSTURE_LOAD_ALERT if policy.load_based else Event.ISSUE_ALERT)
 

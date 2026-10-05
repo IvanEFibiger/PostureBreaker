@@ -195,6 +195,7 @@ class ViewState:
 
     orientation: str = "unknown"
     confidence: float = 0.0
+    confidences: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -205,6 +206,7 @@ class ShoulderState:
     elevation: float | None = None
 
     confidence: float = 0.0
+    confidences: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -213,6 +215,7 @@ class ForwardState:
     torso_forward_angle: float | None = None
 
     confidence: float = 0.0
+    confidences: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

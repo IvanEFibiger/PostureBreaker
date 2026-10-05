@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 from .geometry import EPSILON, angle_degrees, distance_2d, visibility_confidence, weighted_average
 from .landmarks import BodyLandmarks
+from .metrics import mean_confidences
 from .models import ShoulderState
 
 SHOULDER_FIELDS = ("roll", "left_elevation", "right_elevation", "elevation")
@@ -57,9 +58,19 @@ def estimate_shoulder_state(body: BodyLandmarks, min_visibility: float = 0.0) ->
         for value, confidence in ((left_elevation, left_confidence), (right_elevation, right_confidence))
         if value is not None
     ]
-    elevation, _ = max(candidates, key=lambda item: item[1]) if candidates else (None, 0.0)
+    elevation, elevation_confidence = max(candidates, key=lambda item: item[1]) if candidates else (None, 0.0)
 
-    confidences = [
+    confidences: dict[str, float] = {}
+    if roll is not None:
+        confidences["roll"] = roll_confidence
+    if left_elevation is not None:
+        confidences["left_elevation"] = left_confidence
+    if right_elevation is not None:
+        confidences["right_elevation"] = right_confidence
+    if elevation is not None:
+        confidences["elevation"] = elevation_confidence
+
+    present = [
         confidence
         for value, confidence in (
             (roll, roll_confidence),
@@ -68,13 +79,13 @@ def estimate_shoulder_state(body: BodyLandmarks, min_visibility: float = 0.0) ->
         )
         if value is not None
     ]
-
     return ShoulderState(
         roll=roll,
         left_elevation=left_elevation,
         right_elevation=right_elevation,
         elevation=elevation,
-        confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+        confidence=sum(present) / len(present) if present else 0.0,
+        confidences=confidences,
     )
 
 
@@ -90,4 +101,4 @@ def aggregate_shoulders(states: Iterable[ShoulderState | None]) -> ShoulderState
         values[field_name] = weighted_average(pairs) if pairs else None
 
     confidence = sum(state.confidence for state in present) / len(present)
-    return ShoulderState(**values, confidence=confidence)
+    return ShoulderState(**values, confidence=confidence, confidences=mean_confidences(present, SHOULDER_FIELDS))

@@ -25,7 +25,13 @@ class ProfileDistanceTests(unittest.TestCase):
 
     def test_head_only_when_torso_missing(self) -> None:
         distance = profile_distance(ViewState(head_yaw=0.1), MONITOR_1)
-        self.assertAlmostEqual(distance, abs(0.1 - 0.4) * 0.7)
+        self.assertAlmostEqual(distance, abs(0.1 - 0.4) / 0.03 * 0.7)
+
+    def test_normalizes_units_so_torso_does_not_dominate(self) -> None:
+        profile = ViewProfile(id="p", name="P", head_yaw_mean=0.0, head_yaw_std=0.1, torso_yaw_mean=0.0, torso_yaw_std=5.0)
+        distance = profile_distance(ViewState(head_yaw=0.3, torso_yaw=10.0), profile)
+        # head: 3.0 * 0.7 = 2.1 ; torso: 2.0 * 0.3 = 0.6
+        self.assertAlmostEqual(distance, 2.7)
 
     def test_none_when_head_unavailable(self) -> None:
         self.assertIsNone(profile_distance(ViewState(head_yaw=None), MONITOR_1))

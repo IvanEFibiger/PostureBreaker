@@ -13,6 +13,7 @@ from .geometry import (
     weighted_average,
 )
 from .landmarks import BodyLandmarks
+from .metrics import mean_confidences
 from .models import ViewState
 
 # Provisional center band for the categorical orientation, in the same
@@ -183,16 +184,20 @@ def estimate_view_state(body: BodyLandmarks, min_visibility: float = 0.0) -> Vie
     head_roll, roll_confidence = estimate_head_roll(body)
     torso_yaw, torso_yaw_confidence = estimate_torso_yaw(body, min_visibility)
     torso_lean, torso_lean_confidence = estimate_torso_lateral_lean(body, min_visibility)
-    neck_roll, _ = estimate_neck_roll_delta(head_roll, roll_confidence, torso_lean, torso_lean_confidence)
+    neck_roll, neck_roll_confidence = estimate_neck_roll_delta(
+        head_roll, roll_confidence, torso_lean, torso_lean_confidence
+    )
 
     signals = (
-        (head_yaw, yaw_confidence),
-        (head_pitch, pitch_confidence),
-        (head_roll, roll_confidence),
-        (torso_yaw, torso_yaw_confidence),
-        (torso_lean, torso_lean_confidence),
+        ("head_yaw", head_yaw, yaw_confidence),
+        ("head_pitch", head_pitch, pitch_confidence),
+        ("head_roll", head_roll, roll_confidence),
+        ("torso_yaw", torso_yaw, torso_yaw_confidence),
+        ("torso_lateral_lean", torso_lean, torso_lean_confidence),
+        ("neck_roll_delta", neck_roll, neck_roll_confidence),
     )
-    confidences = [confidence for value, confidence in signals if value is not None]
+    confidences = {name: confidence for name, value, confidence in signals if value is not None}
+    present = [confidences[name] for name in confidences]
 
     return ViewState(
         head_yaw=head_yaw,
@@ -202,7 +207,8 @@ def estimate_view_state(body: BodyLandmarks, min_visibility: float = 0.0) -> Vie
         torso_lateral_lean=torso_lean,
         neck_roll_delta=neck_roll,
         orientation=classify_orientation(head_yaw),
-        confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+        confidence=sum(present) / len(present) if present else 0.0,
+        confidences=confidences,
     )
 
 
@@ -222,4 +228,5 @@ def aggregate_view(views: Iterable[ViewState | None]) -> ViewState | None:
         **values,
         orientation=classify_orientation(values["head_yaw"]),
         confidence=confidence,
+        confidences=mean_confidences(states, VIEW_FIELDS),
     )

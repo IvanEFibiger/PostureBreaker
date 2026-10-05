@@ -8,6 +8,11 @@ from .models import CalibrationSet, ViewProfile, ViewState
 HEAD_YAW_WEIGHT = 0.7
 TORSO_YAW_WEIGHT = 0.3
 
+# Each signal is normalized by its calibrated spread; these floors keep an
+# unusually stable calibration from making the distance explode.
+HEAD_YAW_SCALE_FLOOR = 0.03
+TORSO_YAW_SCALE_FLOOR = 3.0
+
 
 @dataclass
 class ViewSelection:
@@ -17,12 +22,22 @@ class ViewSelection:
 
 
 def profile_distance(state: ViewState, profile: ViewProfile) -> float | None:
-    """Weighted distance between the current view and a profile's baseline."""
+    """Weighted distance between the current view and a profile's baseline.
+
+    Both yaws are adimensionalized by their calibrated spread, so a signal in
+    degrees (torso yaw) cannot dominate one that is a ratio (head yaw).
+    """
     if state.head_yaw is None or profile.head_yaw_mean is None:
         return None
-    distance = abs(state.head_yaw - profile.head_yaw_mean) * HEAD_YAW_WEIGHT
+    head_distance = abs(state.head_yaw - profile.head_yaw_mean) / max(
+        profile.head_yaw_std, HEAD_YAW_SCALE_FLOOR
+    )
+    distance = head_distance * HEAD_YAW_WEIGHT
     if state.torso_yaw is not None and profile.torso_yaw_mean is not None:
-        distance += abs(state.torso_yaw - profile.torso_yaw_mean) * TORSO_YAW_WEIGHT
+        torso_distance = abs(state.torso_yaw - profile.torso_yaw_mean) / max(
+            profile.torso_yaw_std, TORSO_YAW_SCALE_FLOOR
+        )
+        distance += torso_distance * TORSO_YAW_WEIGHT
     return distance
 
 

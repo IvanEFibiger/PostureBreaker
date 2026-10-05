@@ -558,7 +558,8 @@ def _camera_worker(
                                 head_mean, torso_mean, head_std, torso_std = calibrator.last_orientation
                                 if calibration_set is None:
                                     calibration_set = CalibrationSet()
-                                if new_view_pending or calibration_set.active_profile() is None:
+                                is_new_view = new_view_pending or calibration_set.active_profile() is None
+                                if is_new_view:
                                     view_id, view_name = _next_view(calibration_set)
                                     active_view = ViewProfile(id=view_id, name=view_name, calibration=profile)
                                     calibration_set.profiles.append(active_view)
@@ -573,7 +574,10 @@ def _camera_worker(
                                     active_view.torso_yaw_std = torso_std
                                     view_baselines, global_baselines = calibrator.last_baselines
                                     active_view.metric_baselines = view_baselines
-                                    calibration_set.global_baselines.update(global_baselines)
+                                    # A brand-new view must not redefine what is meant to be
+                                    # monitor-independent; only a full recalibration updates GLOBAL.
+                                    if not is_new_view:
+                                        calibration_set.global_baselines.update(global_baselines)
                                 new_view_pending = False
                                 active_view_id = active_view.id
                                 selector.active_id = active_view_id

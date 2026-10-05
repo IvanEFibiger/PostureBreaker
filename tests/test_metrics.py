@@ -104,6 +104,10 @@ class MetricSpecTests(unittest.TestCase):
     def test_neck_roll_delta_is_global(self) -> None:
         self.assertEqual(spec_for("neck_roll_delta").calibration_scope, CalibrationScope.GLOBAL)
 
+    def test_shoulder_elevation_is_lower_is_worse(self) -> None:
+        for name in ("shoulder_elevation", "left_shoulder_elevation", "right_shoulder_elevation"):
+            self.assertEqual(spec_for(name).deviation_mode, DeviationMode.LOWER_IS_WORSE)
+
     def test_every_spec_name_is_known(self) -> None:
         for name in METRIC_SPECS:
             self.assertIsNotNone(spec_for(name))
@@ -125,6 +129,20 @@ class BuildObservationsTests(unittest.TestCase):
 
     def test_empty_states(self) -> None:
         self.assertEqual(build_observations(None, None, None), {})
+
+    def test_uses_per_metric_confidence_when_present(self) -> None:
+        observations = build_observations(
+            ViewState(
+                head_roll=1.0,
+                torso_yaw=0.2,
+                confidence=0.5,
+                confidences={"head_roll": 0.95, "torso_yaw": 0.4},
+            ),
+            None,
+            None,
+        )
+        self.assertAlmostEqual(observations["head_roll"].confidence, 0.95)
+        self.assertAlmostEqual(observations["torso_yaw"].confidence, 0.4)
 
 
 if __name__ == "__main__":

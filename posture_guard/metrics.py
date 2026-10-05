@@ -64,13 +64,13 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "torso_lateral_lean": MetricSpec(None, CalibrationScope.VIEW, DeviationMode.TWO_SIDED),
     "shoulder_roll": MetricSpec(PostureIssue.SHOULDER_ASYMMETRY, CalibrationScope.VIEW, DeviationMode.TWO_SIDED, 0.7),
     "shoulder_elevation": MetricSpec(
-        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.1
+        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
     "left_shoulder_elevation": MetricSpec(
-        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.1
+        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
     "right_shoulder_elevation": MetricSpec(
-        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.1
+        PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
     "head_forward_ratio": MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5),
     "torso_forward_angle": MetricSpec(
@@ -85,6 +85,20 @@ def spec_for(metric_name: str) -> MetricSpec | None:
     return METRIC_SPECS.get(metric_name)
 
 
+def mean_confidences(states: list[object], field_names: tuple[str, ...]) -> dict[str, float]:
+    """Average the per-field confidence of each state, falling back to its global one."""
+    confidences: dict[str, float] = {}
+    for name in field_names:
+        present = [
+            getattr(state, "confidences", {}).get(name, getattr(state, "confidence", 0.0))
+            for state in states
+            if getattr(state, name, None) is not None
+        ]
+        if present:
+            confidences[name] = sum(present) / len(present)
+    return confidences
+
+
 def build_observations(
     view: ViewState | None,
     shoulders: ShoulderState | None,
@@ -96,23 +110,25 @@ def build_observations(
         for name in ("head_yaw", "head_pitch", "head_roll", "torso_yaw", "torso_lateral_lean", "neck_roll_delta"):
             value = getattr(view, name)
             if value is not None:
-                observations[name] = MetricObservation(value, view.confidence)
+                observations[name] = MetricObservation(value, view.confidences.get(name, view.confidence))
     if shoulders is not None:
-        for name, value in (
-            ("shoulder_roll", shoulders.roll),
-            ("left_shoulder_elevation", shoulders.left_elevation),
-            ("right_shoulder_elevation", shoulders.right_elevation),
-            ("shoulder_elevation", shoulders.elevation),
+        for field_name, name, value in (
+            ("roll", "shoulder_roll", shoulders.roll),
+            ("left_elevation", "left_shoulder_elevation", shoulders.left_elevation),
+            ("right_elevation", "right_shoulder_elevation", shoulders.right_elevation),
+            ("elevation", "shoulder_elevation", shoulders.elevation),
         ):
             if value is not None:
-                observations[name] = MetricObservation(value, shoulders.confidence)
+                observations[name] = MetricObservation(
+                    value, shoulders.confidences.get(field_name, shoulders.confidence)
+                )
     if forward is not None:
         for name, value in (
             ("head_forward_ratio", forward.head_forward_ratio),
             ("torso_forward_angle", forward.torso_forward_angle),
         ):
             if value is not None:
-                observations[name] = MetricObservation(value, forward.confidence)
+                observations[name] = MetricObservation(value, forward.confidences.get(name, forward.confidence))
     return observations
 
 
