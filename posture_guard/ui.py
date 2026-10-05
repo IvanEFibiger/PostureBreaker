@@ -302,27 +302,3 @@ def draw_guides(frame: Any, metrics: DetectionMetrics | None) -> None:
         cv2.line(frame, px_points["nose"], px_points["shoulder"], (255, 0, 255), 1)
 
 
-def put_banner(frame: Any, message: str, color: tuple[int, int, int]) -> None:
-    h, w = frame.shape[:2]
-    banner_height = 58
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, banner_height), (30, 30, 30), -1)
-    cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-    cv2.putText(
-        frame,
-        message,
-        (18, 36),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.78,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-
-
-def format_seconds(value: float) -> str:
-    total = max(0, int(value))
-    minutes = total // 60
-    seconds = total % 60
-    return f"{minutes:02d}:{seconds:02d}"
-
