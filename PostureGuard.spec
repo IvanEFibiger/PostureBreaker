@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
 
-datas = [('pose_landmarker.task', '.'), ('posture_break_guard.config.json', '.')]
+datas = [('posture_break_guard.config.json', '.')]
 datas += collect_data_files('customtkinter')
 
 
