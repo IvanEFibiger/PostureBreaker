@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from .geometry import EPSILON, angle_degrees, distance_2d, visibility_confidence, weighted_average
+from .landmarks import BodyLandmarks
+from .models import ViewState
+
+# Provisional center band for the categorical orientation, in the same
+# (dimensionless) units as ``head_yaw``. Real thresholds should come from the
+# controlled dataset before the category drives any decision.
+HEAD_YAW_CENTER_THRESHOLD = 0.20
+
+HEAD_FIELDS = ("head_yaw", "head_pitch", "head_roll")
+TORSO_FIELDS = ("torso_yaw", "torso_pitch", "torso_roll")
+VIEW_FIELDS = HEAD_FIELDS + TORSO_FIELDS
+
+
+def _eye_yaw_signal(body: BodyLandmarks) -> tuple[float, float] | None:
+    image = body.image
+    if any(name not in image for name in ("nose", "left_eye", "right_eye")):
+        return None
+    nose = image["nose"]
+    left_eye = image["left_eye"]
+    right_eye = image["right_eye"]
+
+    eye_mid_x = (left_eye.x + right_eye.x) / 2.0
+    eye_span = abs(right_eye.x - left_eye.x)
+    if eye_span < EPSILON:
+        return None
+    value = (nose.x - eye_mid_x) / max(eye_span, EPSILON)
+    return value, visibility_confidence(nose, left_eye, right_eye)
+
+
+def _ear_yaw_signal(body: BodyLandmarks) -> tuple[float, float] | None:
+    image = body.image
+    if any(name not in image for name in ("nose", "left_ear", "right_ear")):
+        return None
+    nose = image["nose"]
+    left_ear = image["left_ear"]
+    right_ear = image["right_ear"]
+
+    left_distance = abs(nose.x - left_ear.x)
+    right_distance = abs(right_ear.x - nose.x)
+    span = left_distance + right_distance
+    if span < EPSILON:
+        return None
+    value = (left_distance - right_distance) / max(span, EPSILON)
+    return value, visibility_confidence(nose, left_ear, right_ear)
+
+
+def estimate_head_yaw(body: BodyLandmarks) -> tuple[float | None, float]:
+    """Signed, calibrated head yaw from eye and ear signals.
+
+    Positive means the nose is displaced towards +x. The value is a geometric
+    signal, not anatomical degrees; calibration provides the personal baseline.
+    """
+    signals = [signal for signal in (_eye_yaw_signal(body), _ear_yaw_signal(body)) if signal]
+    if not signals:
+        return None, 0.0
+    value = weighted_average(signals)
+    if value is None:
+        return None, 0.0
+    confidence = sum(weight for _, weight in signals) / len(signals)
+    return value, confidence
+
+
+def estimate_head_roll(body: BodyLandmarks) -> tuple[float | None, float]:
+    """Head roll in degrees from the eye line; positive when the right eye is lower."""
+    image = body.image
+    if any(name not in image for name in ("left_eye", "right_eye")):
+        return None, 0.0
+    left_eye = image["left_eye"]
+    right_eye = image["right_eye"]
+    if distance_2d(left_eye, right_eye) < EPSILON:
+        return None, 0.0
+    value = angle_degrees(right_eye.x - left_eye.x, right_eye.y - left_eye.y)
+    return value, visibility_confidence(left_eye, right_eye)
+
+
+def estimate_head_pitch(body: BodyLandmarks) -> tuple[float | None, float]:
+    """Nose-to-eye-line ratio; positive when the nose drops (looking down)."""
+    image = body.image
+    if any(name not in image for name in ("nose", "left_eye", "right_eye")):
+        return None, 0.0
+    nose = image["nose"]
+    left_eye = image["left_eye"]
+    right_eye = image["right_eye"]
+
+    eye_mid_y = (left_eye.y + right_eye.y) / 2.0
+    eye_span = distance_2d(left_eye, right_eye)
+    if eye_span < EPSILON:
+        return None, 0.0
+    value = (nose.y - eye_mid_y) / max(eye_span, EPSILON)
+    return value, visibility_confidence(nose, left_eye, right_eye)
+
+
+def classify_orientation(head_yaw: float | None) -> str:
+    if head_yaw is None:
+        return "unknown"
+    if head_yaw > HEAD_YAW_CENTER_THRESHOLD:
+        return "right"
+    if head_yaw < -HEAD_YAW_CENTER_THRESHOLD:
+        return "left"
+    return "center"
+
+
+def estimate_view_state(body: BodyLandmarks) -> ViewState:
+    head_yaw, yaw_confidence = estimate_head_yaw(body)
+    head_pitch, pitch_confidence = estimate_head_pitch(body)
+    head_roll, roll_confidence = estimate_head_roll(body)
+
+    confidences: list[float] = []
+    if head_yaw is not None:
+        confidences.append(yaw_confidence)
+    if head_pitch is not None:
+        confidences.append(pitch_confidence)
+    if head_roll is not None:
+        confidences.append(roll_confidence)
+
+    return ViewState(
+        head_yaw=head_yaw,
+        head_pitch=head_pitch,
+        head_roll=head_roll,
+        orientation=classify_orientation(head_yaw),
+        confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+    )
+
+
+def aggregate_view(views: Iterable[ViewState | None]) -> ViewState | None:
+    """Confidence-weighted smoothing of several view states, e.g. over a window."""
+    states = [view for view in views if view is not None]
+    if not states:
+        return None
+
+    values: dict[str, float | None] = {}
+    for field_name in VIEW_FIELDS:
+        pairs = [(getattr(state, field_name), state.confidence) for state in states if getattr(state, field_name) is not None]
+        values[field_name] = weighted_average(pairs) if pairs else None
+
+    confidence = sum(state.confidence for state in states) / len(states)
+    return ViewState(
+        **values,
+        orientation=classify_orientation(values["head_yaw"]),
+        confidence=confidence,
+    )

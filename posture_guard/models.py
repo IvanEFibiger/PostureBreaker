@@ -56,11 +56,26 @@ class CalibrationProfile:
 
 
 @dataclass
+class ViewState:
+    head_yaw: float | None = None
+    head_pitch: float | None = None
+    head_roll: float | None = None
+
+    torso_yaw: float | None = None
+    torso_pitch: float | None = None
+    torso_roll: float | None = None
+
+    orientation: str = "unknown"
+    confidence: float = 0.0
+
+
+@dataclass
 class DetectionMetrics:
     side: str
     values: dict[str, float]
     confidence: dict[str, float] = field(default_factory=dict)
     points: dict[str, tuple[float, float]] = field(default_factory=dict)
+    view: ViewState | None = None
 
 
 @dataclass
