@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "posturebreaker"
+description = "Monitor de postura local con webcam, pausas y analytics."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Ivan Fibiger" }]
+dependencies = [
+    "mediapipe==0.10.33",
+    "opencv-contrib-python==4.13.0.92",
+    "numpy==2.4.4",
+    "customtkinter==5.2.2",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+desktop = [
+    "pystray==0.19.5",
+    "Pillow==12.1.1",
+    "plyer==2.1.0",
+]
+
+[project.scripts]
+posturebreaker = "posture_guard.main:main"
+
+[tool.setuptools]
+packages = ["posture_guard"]
+
+[tool.setuptools.dynamic]
+version = { attr = "posture_guard.__version__" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .alerts import BreakManager
 from .config import Config
@@ -10,7 +10,7 @@ from .models import AlertState, CalibrationProfile, DetectionMetrics
 from .timing import is_session_gap
 
 
-class Event(str, Enum):
+class Event(StrEnum):
     POSTURE_BAD_STARTED = "posture_bad_started"
     POSTURE_RECOVERED = "posture_recovered"
     POSTURE_ALERT = "posture_alert"
