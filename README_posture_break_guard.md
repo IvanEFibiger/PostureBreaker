@@ -4,14 +4,16 @@ Monitor postural con webcam e IA. Detecta mala postura, recuerda pausas y muestr
 
 ## Dependencias
 
+Versiones pinneadas en `requirements.txt`:
+
 ```bash
-pip install mediapipe opencv-python customtkinter
+pip install -r requirements.txt
 ```
 
 **Opcionales** (mejoran la experiencia pero no son obligatorias):
 
 ```bash
-pip install pystray Pillow plyer
+pip install -r requirements-optional.txt
 ```
 
 - `customtkinter`: dashboard visual (sin él corre en modo headless)
@@ -20,7 +22,13 @@ pip install pystray Pillow plyer
 
 ## Modelo
 
-Necesita `pose_landmarker.task` de MediaPipe. Dejalo en la carpeta raíz o configurá la ruta en `posture_break_guard.config.json`.
+Necesita `pose_landmarker.task` de MediaPipe. Descargalo y verificá su integridad con:
+
+```bash
+python scripts/fetch_model.py --variant heavy
+```
+
+Variantes (`--variant`): `heavy` (default, ~29 MB), `full` (~9 MB), `lite` (~5,8 MB). El script verifica el SHA256 contra el CDN oficial y no vuelve a bajar el archivo si ya es válido. Dejalo en la carpeta raíz o configurá `model_path` en `posture_break_guard.config.json`.
 
 ## Estructura
 
@@ -28,18 +36,28 @@ Necesita `pose_landmarker.task` de MediaPipe. Dejalo en la carpeta raíz o confi
 posture_break_guard.py              ← entry point
 posture_break_guard.config.json     ← configuración
 posture_calibration.json            ← se genera al calibrar
+requirements.txt                    ← dependencias núcleo (pinneadas)
+requirements-optional.txt           ← bandeja + notificaciones (opcionales)
+scripts/
+  fetch_model.py    ← descarga + verifica el modelo
+tests/              ← suite de tests (unittest)
 posture_guard/
-  config.py         ← Config + carga
+  config.py         ← Config + validación + carga
   models.py         ← dataclasses compartidos
   calibration.py    ← calibración + thresholds
   detection.py      ← landmarks + métricas + clasificación
-  alerts.py         ← pausas + historial
+  alerts.py         ← pausas
   notifications.py  ← notificaciones nativas + sonido
-  scoring.py        ← puntuación diaria + rachas
   state.py          ← estado compartido entre threads
   ui.py             ← overlay, tray, helpers de dibujo
   dashboard.py      ← interfaz principal (CustomTkinter)
   main.py           ← orquestador (worker + dashboard)
+```
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -t . -v
 ```
 
 ## Cómo correrlo
@@ -100,9 +118,11 @@ Editá `posture_break_guard.config.json`:
 | Parámetro | Default | Descripción |
 |---|---|---|
 | `camera_index` | 0 | Índice de cámara |
+| `min_visibility` | 0.55 | Visibilidad mínima de landmarks (0-1) |
 | `sustained_bad_posture_seconds` | 20 | Segundos para disparar alerta |
+| `posture_min_bad_metrics` | 2 | Métricas malas necesarias para marcarla como mala |
 | `posture_alert_cooldown_seconds` | 300 | Cooldown entre alertas |
-| `break_interval_minutes` | 50 | Minutos entre pausas |
+| `break_interval_minutes` | 45 | Minutos entre pausas |
 | `break_required_seconds` | 90 | Segundos para validar pausa |
 | `target_fps` | 15 | FPS objetivo (reduce CPU) |
 | `headless` | false | Arrancar sin ventana |
