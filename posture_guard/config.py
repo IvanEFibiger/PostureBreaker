@@ -34,6 +34,7 @@ class Config:
     history_dir: str = "history"
     smoothing_window: int = 12
     smoothing_min_observations: int = 6
+    debug_snapshot_path: str = "history/debug_snapshots.jsonl"
     default_margins: dict[str, float] = field(
         default_factory=lambda: {
             "ear_shoulder_dx": 0.035,
@@ -67,7 +68,7 @@ _AT_LEAST_ONE_FIELDS = (
     "posture_min_bad_metrics",
     "calibration_min_enabled_metrics",
 )
-_NON_EMPTY_TEXT_FIELDS = ("model_path", "database_path", "history_dir")
+_NON_EMPTY_TEXT_FIELDS = ("model_path", "database_path", "history_dir", "debug_snapshot_path")
 
 
 def _is_number(value: object) -> bool:

@@ -26,6 +26,7 @@
   "history_dir": "history",
   "smoothing_window": 12,
   "smoothing_min_observations": 6,
+  "debug_snapshot_path": "history/debug_snapshots.jsonl",
   "default_margins": {
     "ear_shoulder_dx": 0.035,
     "nose_shoulder_dx": 0.045,

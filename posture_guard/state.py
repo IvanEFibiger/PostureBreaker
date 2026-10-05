@@ -67,11 +67,13 @@ class SharedState:
     cmd_set_camera: bool = False
     cmd_toggle_autostart: bool = False
     cmd_diagnostics: bool = False
+    cmd_snapshot: bool = False
     cmd_apply_settings: bool = False
     cmd_hide_window: bool = False
     cmd_show_window: bool = False
     cmd_quit: bool = False
     pending_camera_index: int = -1
+    pending_snapshot_label: str = "manual"
     pending_settings: dict[str, float] = field(default_factory=dict)
 
     def update(self, **kwargs: object) -> None:

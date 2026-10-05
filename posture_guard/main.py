@@ -17,6 +17,7 @@ from .autostart import Autostart
 from .calibration import Calibrator, load_calibration, save_calibration
 from .camera import CameraError, list_cameras, open_camera
 from .config import Config, apply_settings, load_config, save_config
+from .debug import SNAPSHOT_LABELS, append_snapshot, build_snapshot, format_debug_lines
 from .detection import RollingMetrics, extract_metrics
 from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
@@ -539,6 +540,18 @@ def _camera_worker(
 
                 _handle_events(result, store, notifications, smoother, config)
 
+                if shared.consume_command("cmd_snapshot"):
+                    label = str(shared.consume_value("pending_snapshot_label", "manual"))
+                    try:
+                        append_snapshot(
+                            _resolve_path(data_dir, config.debug_snapshot_path),
+                            build_snapshot(metrics, label),
+                        )
+                        shared.update(calibration_summary=f"Snapshot guardado: {label}")
+                    except OSError:
+                        logger.exception("snapshot_failed")
+                        shared.update(calibration_summary="No pude guardar el snapshot.")
+
                 break_title, break_instruction, break_rule = _break_payload(
                     result.break_due,
                     result.break_progress,
@@ -667,6 +680,15 @@ def _camera_worker(
                         ),
                     ]
                     draw_text_block(frame, info_lines, (18, 30), (255, 255, 255), scale=0.48)
+                    debug_lines = format_debug_lines(metrics, config.metric_min_confidence)
+                    draw_text_block(
+                        frame,
+                        debug_lines,
+                        (max(12, frame.shape[1] - 320), 30),
+                        (0, 255, 180),
+                        scale=0.42,
+                        line_height=16,
+                    )
                     shared.update(camera_frame=frame.copy())
                 else:
                     shared.update(camera_frame=None)
@@ -735,6 +757,13 @@ def main() -> None:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
                     shared.update(cmd_toggle_camera=True)
+                else:
+                    char = chr(key) if 0 < key < 128 else ""
+                    if char in SNAPSHOT_LABELS:
+                        label = SNAPSHOT_LABELS[char]
+                        shared.update(pending_snapshot_label=label, calibration_summary=f"Etiqueta: {label}")
+                    elif char == "s":
+                        shared.update(cmd_snapshot=True)
             else:
                 try:
                     cv2.destroyWindow(camera_window)

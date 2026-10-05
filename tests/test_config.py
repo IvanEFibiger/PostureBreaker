@@ -89,6 +89,7 @@ class ConfigValidationTests(unittest.TestCase):
         config = Config()
         self.assertEqual(config.calibration_min_metric_coverage, 0.75)
         self.assertEqual(config.smoothing_min_observations, 6)
+        self.assertEqual(config.debug_snapshot_path, "history/debug_snapshots.jsonl")
 
     def test_negative_duration_raises(self) -> None:
         self._write({"break_interval_minutes": -5})
