@@ -44,6 +44,8 @@ tests/              ← suite de tests (unittest)
 posture_guard/
   config.py         ← Config + validación + carga
   models.py         ← dataclasses compartidos
+  engine.py         ← motor temporal (postura, pausas, foco) + eventos
+  timing.py         ← detección de gaps temporales
   calibration.py    ← calibración + thresholds
   detection.py      ← landmarks + métricas + clasificación
   alerts.py         ← pausas
