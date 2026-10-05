@@ -9,15 +9,13 @@ from pathlib import Path
 import cv2
 import mediapipe as mp
 
-from .alerts import BreakManager
 from .calibration import Calibrator, load_calibration, save_calibration
 from .config import Config, load_config
-from .detection import RollingMetrics, classify_posture, dominant_issue, extract_metrics
-from .models import AlertState
+from .detection import RollingMetrics, extract_metrics
+from .engine import EngineResult, Event, PostureEngine
 from .notifications import Notifications
 from .state import SharedState
 from .storage import AnalyticsStore
-from .timing import is_session_gap
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
 
 BREAK_ROUTINES = [
@@ -111,6 +109,74 @@ def _tray_status_from_state(status: str) -> str:
     return mapping.get(status, "off")
 
 
+def _status_from_result(result: EngineResult) -> str:
+    if not result.profile_ready:
+        return "no_calibration"
+    if result.break_due:
+        return "break_due"
+    if result.posture_active and result.bad_streak_seconds >= result.posture_threshold_seconds:
+        return "bad"
+    return "ok"
+
+
+def _handle_events(
+    result: EngineResult,
+    store: AnalyticsStore,
+    notifications: Notifications,
+    smoother: RollingMetrics,
+    config: Config,
+) -> None:
+    for event in result.events:
+        if event is Event.SESSION_GAP:
+            smoother.clear()
+            store.log_break_event(
+                "session_gap",
+                detail=f"Gap de {result.session_gap_seconds:.0f}s",
+                focus_mode=result.focus_mode,
+            )
+        elif event is Event.POSTURE_ALERT:
+            detail = result.issue_guidance or "Corrige cabeza, hombros y espalda."
+            notifications.posture_alert(result.issue_label or "Enderezate", detail)
+            store.log_posture_event(
+                "posture_alert",
+                error_type=result.issue_type,
+                severity=result.issue_severity,
+                suppressed=False,
+                detail=detail,
+            )
+        elif event is Event.POSTURE_ALERT_SUPPRESSED:
+            store.log_posture_event(
+                "posture_alert_suppressed",
+                error_type=result.issue_type,
+                severity=result.issue_severity,
+                suppressed=True,
+                detail=result.issue_guidance or "Corrige cabeza, hombros y espalda.",
+            )
+        elif event in (Event.BREAK_ALERT, Event.BREAK_ALERT_REPEAT):
+            routine_title, routine_step, _ = _break_payload(
+                True, result.break_progress, 0.0, result.completed_breaks
+            )
+            notifications.break_alert(f"{routine_title}. {routine_step}")
+            store.log_break_event(
+                event.value,
+                detail=f"{routine_title}: {routine_step}",
+                focus_mode=result.focus_mode,
+            )
+        elif event is Event.BREAK_COMPLETED:
+            notifications.break_completed()
+            store.log_break_event(
+                "break_completed",
+                detail="Break completado",
+                focus_mode=result.focus_mode,
+            )
+        elif event is Event.WORK_RESET_ABSENCE:
+            store.log_break_event(
+                "work_reset_absence",
+                detail=f"Reset por ausencia > {int(config.away_reset_seconds)}s",
+                focus_mode=result.focus_mode,
+            )
+
+
 def _camera_worker(
     shared: SharedState,
     config: Config,
@@ -120,8 +186,7 @@ def _camera_worker(
 ) -> None:
     profile = load_calibration(calibration_path)
     notifications = Notifications()
-    alert_state = AlertState()
-    break_manager = BreakManager(config, alert_state)
+    engine = PostureEngine(config, profile)
     calibrator = Calibrator(config.calibration_frames)
     smoother = RollingMetrics(config.smoothing_window)
 
@@ -131,7 +196,6 @@ def _camera_worker(
     store.start_session(config.camera_index)
 
     show_camera = False
-    focus_mode = False
     shared.update(
         calibrated=profile is not None,
         status="no_calibration" if not profile else "ok",
@@ -139,7 +203,7 @@ def _camera_worker(
         hourly_trend=store.hourly_trend(),
         weekly_trend=store.weekly_trend(),
         top_errors=store.top_errors(),
-        focus_mode=focus_mode,
+        focus_mode=False,
         camera_visible=show_camera,
     )
 
@@ -197,10 +261,10 @@ def _camera_worker(
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             timestamp_ms = int(time.monotonic() * 1000)
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+            detection = landmarker.detect_for_video(mp_image, timestamp_ms)
 
             preferred_side = profile.side if profile else None
-            raw_metrics = extract_metrics(result, config, preferred_side=preferred_side)
+            raw_metrics = extract_metrics(detection, config, preferred_side=preferred_side)
             if raw_metrics:
                 smoother.append(raw_metrics)
             else:
@@ -212,17 +276,6 @@ def _camera_worker(
             now_ts = time.monotonic()
             dt_seconds = max(0.0, now_ts - last_frame_ts)
             last_frame_ts = now_ts
-            if is_session_gap(dt_seconds, config.max_frame_gap_seconds):
-                alert_state.bad_posture_streak = 0.0
-                alert_state.posture_active = False
-                smoother.clear()
-                break_manager.reset_continuity()
-                store.log_break_event(
-                    "session_gap",
-                    detail=f"Gap de {dt_seconds:.0f}s",
-                    focus_mode=focus_mode,
-                )
-                dt_seconds = 0.0
 
             if shared.consume_command("cmd_calibrate_good"):
                 calibrator.start("good")
@@ -233,6 +286,7 @@ def _camera_worker(
                     notifications.generic()
             if shared.consume_command("cmd_clear_calibration"):
                 profile = None
+                engine.clear_profile()
                 calibrator.cancel()
                 if calibration_path.exists():
                     calibration_path.unlink()
@@ -241,8 +295,8 @@ def _camera_worker(
             if shared.consume_command("cmd_toggle_camera"):
                 show_camera = not show_camera
             if shared.consume_command("cmd_toggle_focus"):
-                focus_mode = not focus_mode
-                store.set_focus_mode(focus_mode)
+                engine.toggle_focus()
+                store.set_focus_mode(engine.focus_mode)
 
             if calibrator.is_running():
                 shared.update(
@@ -255,6 +309,7 @@ def _camera_worker(
                     if done:
                         try:
                             profile = calibrator.build_profile(profile, config)
+                            engine.set_profile(profile)
                             save_calibration(calibration_path, profile)
                             notifications.calibration_ok()
                             shared.update(
@@ -269,149 +324,80 @@ def _camera_worker(
             else:
                 shared.update(calibrating_mode="", calibration_progress=0.0)
 
-            if has_pose:
-                store.add_work_time(dt_seconds, focus_mode=focus_mode)
+            result = engine.update(metrics, has_pose, dt_seconds, now_ts)
 
-            posture_bad, bad_by_metric, severity = classify_posture(
-                profile, metrics, config.posture_min_bad_metrics
-            )
-            issue_type, issue_label, issue_guidance, issue_severity = dominant_issue(bad_by_metric, severity)
+            if result.work_seconds_delta > 0.0:
+                store.add_work_time(result.work_seconds_delta, focus_mode=result.focus_mode)
+            if result.count_posture_time:
+                store.add_posture_time(result.posture_seconds_delta, result.posture_bad)
 
-            if has_pose and profile:
-                store.add_posture_time(dt_seconds, posture_bad)
-
-            posture_threshold = config.sustained_bad_posture_seconds * (config.focus_posture_multiplier if focus_mode else 1.0)
-            posture_cooldown = config.posture_alert_cooldown_seconds * (config.focus_cooldown_multiplier if focus_mode else 1.0)
-
-            if posture_bad:
-                alert_state.bad_posture_streak += dt_seconds
-                alert_state.posture_active = True
-                if (
-                    alert_state.bad_posture_streak >= posture_threshold
-                    and now_ts - alert_state.last_posture_alert_at >= posture_cooldown
-                ):
-                    alert_state.last_posture_alert_at = now_ts
-                    alert_state.posture_alert_count += 1
-                    detail = issue_guidance or "Corrige cabeza, hombros y espalda."
-                    if focus_mode:
-                        store.log_posture_event(
-                            "posture_alert_suppressed",
-                            error_type=issue_type,
-                            severity=issue_severity,
-                            suppressed=True,
-                            detail=detail,
-                        )
-                    else:
-                        notifications.posture_alert(issue_label or "Enderezate", detail)
-                        store.log_posture_event(
-                            "posture_alert",
-                            error_type=issue_type,
-                            severity=issue_severity,
-                            suppressed=False,
-                            detail=detail,
-                        )
-            else:
-                alert_state.bad_posture_streak = 0.0
-                alert_state.posture_active = False
-
-            repeat_interval = (
-                config.focus_break_repeat_seconds if focus_mode else config.break_repeat_alert_seconds
-            )
-            for event in break_manager.update(has_pose, dt_seconds, now_ts, repeat_interval):
-                current_progress = alert_state.away_during_break / max(config.break_required_seconds, 1.0)
-                routine_title, routine_step, routine_rule = _break_payload(
-                    True,
-                    current_progress,
-                    0.0,
-                    alert_state.completed_breaks,
-                )
-                if event in {"break_alert", "break_alert_repeat"}:
-                    notifications.break_alert(f"{routine_title}. {routine_step}")
-                    store.log_break_event(event, detail=f"{routine_title}: {routine_step}", focus_mode=focus_mode)
-                elif event == "break_completed":
-                    notifications.break_completed()
-                    store.log_break_event("break_completed", detail="Break completado", focus_mode=focus_mode)
-                elif event == "work_reset_absence":
-                    store.log_break_event(
-                        "work_reset_absence",
-                        detail=f"Reset por ausencia > {int(config.away_reset_seconds)}s",
-                        focus_mode=focus_mode,
-                    )
-
-            break_progress = 0.0
-            countdown_seconds = 0.0
-            if alert_state.break_due:
-                break_progress = min(1.0, alert_state.away_during_break / max(config.break_required_seconds, 1.0))
-            else:
-                interval_seconds = config.break_interval_minutes * 60.0
-                worked = min(interval_seconds, alert_state.work_since_break)
-                break_progress = min(1.0, worked / max(interval_seconds, 1.0))
-                countdown_seconds = max(0.0, interval_seconds - alert_state.work_since_break)
+            _handle_events(result, store, notifications, smoother, config)
 
             break_title, break_instruction, break_rule = _break_payload(
-                alert_state.break_due,
-                break_progress,
-                countdown_seconds,
-                alert_state.completed_breaks,
+                result.break_due,
+                result.break_progress,
+                result.break_countdown_seconds,
+                result.completed_breaks,
             )
 
             if not calibrator.is_running():
-                if not profile:
-                    status = "no_calibration"
-                elif alert_state.break_due:
-                    status = "break_due"
-                elif alert_state.posture_active and alert_state.bad_posture_streak >= posture_threshold:
-                    status = "bad"
-                else:
-                    status = "ok"
-
                 today = store.today_snapshot()
-                issue_title = issue_label
-                if posture_bad and issue_label:
-                    issue_title = f"{_severity_prefix(issue_severity)}: {issue_label}"
+                issue_title = result.issue_label
+                if result.posture_bad and result.issue_label:
+                    issue_title = f"{_severity_prefix(result.issue_severity)}: {result.issue_label}"
                 shared.update(
-                    status=status,
+                    status=_status_from_result(result),
                     posture_score=store.score,
-                    is_bad_posture=posture_bad,
-                    has_pose=has_pose,
+                    is_bad_posture=result.posture_bad,
+                    has_pose=result.has_pose,
                     work_seconds_today=today["total_work_seconds"],
-                    bad_streak_seconds=alert_state.bad_posture_streak,
+                    bad_streak_seconds=result.bad_streak_seconds,
                     bad_posture_seconds_today=today["bad_posture_seconds"],
                     posture_alerts=today["posture_alerts"],
                     suppressed_posture_alerts=today["suppressed_posture_alerts"],
                     break_alerts=today["break_alerts"],
                     breaks_completed=today["breaks_completed"],
-                    break_due=alert_state.break_due,
+                    break_due=result.break_due,
                     summary_today=store.summary_today(),
-                    current_issue=issue_title if posture_bad else ("Modo foco" if focus_mode else ""),
-                    current_guidance=(
-                        issue_guidance if posture_bad else ("Alertas suaves activas. Se retrasa el aviso y aparece un tinte rojo suave si seguis encorvado." if focus_mode else "")
+                    current_issue=(
+                        issue_title
+                        if result.posture_bad
+                        else ("Modo foco" if result.focus_mode else "")
                     ),
-                    focus_mode=focus_mode,
+                    current_guidance=(
+                        result.issue_guidance
+                        if result.posture_bad
+                        else (
+                            "Alertas suaves activas. Se retrasa el aviso y aparece un tinte rojo suave si seguis encorvado."
+                            if result.focus_mode
+                            else ""
+                        )
+                    ),
+                    focus_mode=result.focus_mode,
                     focus_hint=(
-                        f"Modo foco activo. Pausa en {int(countdown_seconds // 60)}m. Alertas suaves hoy: {today['suppressed_posture_alerts']}"
-                        if focus_mode
+                        f"Modo foco activo. Pausa en {int(result.break_countdown_seconds // 60)}m. Alertas suaves hoy: {today['suppressed_posture_alerts']}"
+                        if result.focus_mode
                         else f"Tiempo en foco hoy: {int(today['focus_seconds'] // 60)} min"
                     ),
                     focus_seconds_today=today["focus_seconds"],
                     camera_visible=show_camera,
-                    break_progress=break_progress,
-                    break_countdown_seconds=countdown_seconds,
+                    break_progress=result.break_progress,
+                    break_countdown_seconds=result.break_countdown_seconds,
                     break_title=break_title,
                     break_instruction=break_instruction,
                     break_rule_text=break_rule,
                 )
 
-            if alert_state.break_due:
+            if result.break_due:
                 shared.update(
                     overlay_message=f"PAUSA ACTIVA\n{break_instruction}",
                     overlay_bg="#d97706",
                     overlay_mode="banner",
                     overlay_alpha=0.92,
                 )
-            elif alert_state.posture_active and alert_state.bad_posture_streak >= posture_threshold:
-                title = (issue_label or "Enderezate").upper()
-                if focus_mode:
+            elif result.posture_active and result.bad_streak_seconds >= result.posture_threshold_seconds:
+                title = (result.issue_label or "Enderezate").upper()
+                if result.focus_mode:
                     shared.update(
                         overlay_message=f"MODO FOCO  |  {title}",
                         overlay_bg="#b91c1c",
@@ -420,7 +406,7 @@ def _camera_worker(
                     )
                 else:
                     shared.update(
-                        overlay_message=f"{title}\n{issue_guidance}",
+                        overlay_message=f"{title}\n{result.issue_guidance}",
                         overlay_bg="#b91c1c",
                         overlay_mode="banner",
                         overlay_alpha=0.92,
@@ -429,11 +415,11 @@ def _camera_worker(
                 shared.update(overlay_message="")
 
             sample_signature = (
-                has_pose,
-                posture_bad,
-                issue_type,
-                alert_state.break_due,
-                focus_mode,
+                result.has_pose,
+                result.posture_bad,
+                result.issue_type,
+                result.break_due,
+                result.focus_mode,
             )
             if (
                 now_ts - last_sample_at >= max(5.0, config.analytics_sample_seconds)
@@ -441,12 +427,12 @@ def _camera_worker(
             ):
                 store.record_sample(
                     timestamp=dt.datetime.now(),
-                    has_pose=has_pose,
-                    is_bad=posture_bad,
-                    break_due=alert_state.break_due,
-                    focus_mode=focus_mode,
-                    error_type=issue_type,
-                    error_severity=issue_severity,
+                    has_pose=result.has_pose,
+                    is_bad=result.posture_bad,
+                    break_due=result.break_due,
+                    focus_mode=result.focus_mode,
+                    error_type=result.issue_type,
+                    error_severity=result.issue_severity,
                 )
                 last_sample_at = now_ts
                 last_sample_signature = sample_signature
@@ -467,8 +453,12 @@ def _camera_worker(
                 info_lines = [
                     f"Lado: {metrics.side if metrics else '-'} | Cal: {side_text}",
                     f"Score: {store.score:.0f}%",
-                    f"Issue: {issue_label or '-'}",
-                    "Modo foco ON" if focus_mode else f"Pausa en {int(countdown_seconds // 60)}m",
+                    f"Issue: {result.issue_label or '-'}",
+                    (
+                        "Modo foco ON"
+                        if result.focus_mode
+                        else f"Pausa en {int(result.break_countdown_seconds // 60)}m"
+                    ),
                 ]
                 draw_text_block(frame, info_lines, (18, 30), (255, 255, 255), scale=0.48)
                 shared.update(camera_frame=frame.copy())
