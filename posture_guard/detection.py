@@ -5,6 +5,7 @@ from collections import deque
 from typing import Any
 
 from .config import Config
+from .geometry import visibility_confidence
 from .models import CalibrationProfile, DetectionMetrics
 
 # MediaPipe Pose landmark indices.
@@ -75,11 +76,6 @@ def choose_side(landmarks: list[Any], min_visibility: float) -> str | None:
     return max(scored, key=lambda item: item[1])[0]
 
 
-def _visibility_confidence(*landmarks: Any) -> float:
-    """Lowest landmark visibility involved in a metric, in [0, 1]."""
-    return min(float(lm.visibility) for lm in landmarks)
-
-
 def extract_metrics(result: Any, config: Config, preferred_side: str | None = None) -> DetectionMetrics | None:
     if not result.pose_landmarks:
         return None
@@ -111,13 +107,13 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
         "chin_drop": nose.y - ear.y,
     }
     confidence = {
-        "ear_shoulder_dx": _visibility_confidence(ear, shoulder),
-        "nose_shoulder_dx": _visibility_confidence(nose, shoulder),
-        "chin_drop": _visibility_confidence(nose, ear),
+        "ear_shoulder_dx": visibility_confidence(ear, shoulder),
+        "nose_shoulder_dx": visibility_confidence(nose, shoulder),
+        "chin_drop": visibility_confidence(nose, ear),
     }
     if hip.visibility >= config.min_visibility:
         values["torso_lean_dx"] = shoulder.x - hip.x
-        confidence["torso_lean_dx"] = _visibility_confidence(shoulder, hip)
+        confidence["torso_lean_dx"] = visibility_confidence(shoulder, hip)
 
     points = {
         "ear": (ear.x, ear.y),
