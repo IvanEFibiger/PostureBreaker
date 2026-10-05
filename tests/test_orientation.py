@@ -119,6 +119,16 @@ class HeadRollTests(unittest.TestCase):
         value, _ = estimate_head_roll(body(image))
         self.assertAlmostEqual(value, 0.0)
 
+    def test_opposite_line_orders_fold_together(self) -> None:
+        image = {
+            "left_eye": p(0.45, 0.5),
+            "right_eye": p(0.55, 0.5),  # eye line: 0
+            "left_mouth": p(0.55, 0.6),
+            "right_mouth": p(0.45, 0.6),  # mouth line: 180 -> folds to 0
+        }
+        value, _ = estimate_head_roll(body(image))
+        self.assertAlmostEqual(value, 0.0)
+
 
 class HeadPitchTests(unittest.TestCase):
     def test_nose_below_eye_line_is_positive(self) -> None:

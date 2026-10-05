@@ -37,6 +37,11 @@ class ShoulderRollTests(unittest.TestCase):
         self.assertAlmostEqual(value, 0.0)
         self.assertAlmostEqual(confidence, 0.9)
 
+    def test_line_near_180_folds_to_zero(self) -> None:
+        image = {"left_shoulder": p(0.6, 0.5), "right_shoulder": p(0.4, 0.5)}
+        value, _ = estimate_shoulder_roll(body(image))
+        self.assertAlmostEqual(value, 0.0)
+
     def test_right_shoulder_lower_is_positive(self) -> None:
         image = both_sides()
         image["right_shoulder"] = p(0.6, 0.6)

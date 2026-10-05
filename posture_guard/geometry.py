@@ -40,6 +40,18 @@ def angle_from_vertical(dx: float, dy: float) -> float:
     return math.degrees(math.atan2(dx, dy))
 
 
+def normalize_line_angle(angle: float) -> float:
+    """Fold an undirected line angle to (-90, 90].
+
+    A line and its opposite are the same line, so 178° and -2° must compare
+    equal; without this the average near ±180 wraps and explodes.
+    """
+    folded = angle % 180.0
+    if folded > 90.0:
+        folded -= 180.0
+    return folded
+
+
 def midpoint(a: Point2D, b: Point2D) -> Point2D:
     return Point2D(
         x=(a.x + b.x) / 2.0,

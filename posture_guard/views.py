@@ -21,6 +21,11 @@ class ViewSelection:
     changed: bool
 
 
+def _circular_difference(a: float, b: float) -> float:
+    """Angular difference in [0, 180], robust to the 0/360 wrap."""
+    return abs(((a - b + 180.0) % 360.0) - 180.0)
+
+
 def profile_distance(state: ViewState, profile: ViewProfile) -> float | None:
     """Weighted distance between the current view and a profile's baseline.
 
@@ -34,7 +39,7 @@ def profile_distance(state: ViewState, profile: ViewProfile) -> float | None:
     )
     distance = head_distance * HEAD_YAW_WEIGHT
     if state.torso_yaw is not None and profile.torso_yaw_mean is not None:
-        torso_distance = abs(state.torso_yaw - profile.torso_yaw_mean) / max(
+        torso_distance = _circular_difference(state.torso_yaw, profile.torso_yaw_mean) / max(
             profile.torso_yaw_std, TORSO_YAW_SCALE_FLOOR
         )
         distance += torso_distance * TORSO_YAW_WEIGHT

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .geometry import EPSILON, angle_degrees, distance_2d, visibility_confidence, weighted_average
+from .geometry import (
+    EPSILON,
+    angle_degrees,
+    distance_2d,
+    normalize_line_angle,
+    visibility_confidence,
+    weighted_average,
+)
 from .landmarks import BodyLandmarks
 from .metrics import field_confidence, mean_confidences
 from .models import ShoulderState
@@ -23,7 +30,8 @@ def estimate_shoulder_roll(body: BodyLandmarks, min_visibility: float = 0.0) -> 
         return None, 0.0
     if distance_2d(left_shoulder, right_shoulder) < EPSILON:
         return None, 0.0
-    return angle_degrees(right_shoulder.x - left_shoulder.x, right_shoulder.y - left_shoulder.y), confidence
+    value = normalize_line_angle(angle_degrees(right_shoulder.x - left_shoulder.x, right_shoulder.y - left_shoulder.y))
+    return value, confidence
 
 
 def _shoulder_width(image: dict[str, object]) -> float | None:

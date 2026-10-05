@@ -76,7 +76,7 @@ class SharedState:
     cmd_show_window: bool = False
     cmd_quit: bool = False
     pending_camera_index: int = -1
-    pending_snapshot_label: str = "monitor_1_good"
+    pending_snapshot_label: str = "good"
     pending_settings: dict[str, float] = field(default_factory=dict)
 
     def update(self, **kwargs: object) -> None:

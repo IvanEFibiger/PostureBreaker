@@ -10,6 +10,7 @@ from .geometry import (
     angle_from_vertical,
     distance_2d,
     midpoint,
+    normalize_line_angle,
     visibility_confidence,
     weighted_average,
 )
@@ -78,7 +79,7 @@ def estimate_head_yaw(body: BodyLandmarks) -> tuple[float | None, float]:
 
 
 def _line_roll(left: Point2D, right: Point2D) -> float:
-    return angle_degrees(right.x - left.x, right.y - left.y)
+    return normalize_line_angle(angle_degrees(right.x - left.x, right.y - left.y))
 
 
 def estimate_head_roll(body: BodyLandmarks) -> tuple[float | None, float]:
@@ -105,7 +106,7 @@ def estimate_head_roll(body: BodyLandmarks) -> tuple[float | None, float]:
     value = weighted_average(signals)
     if value is None:
         return None, 0.0
-    return value, sum(weight for _, weight in signals) / len(signals)
+    return normalize_line_angle(value), sum(weight for _, weight in signals) / len(signals)
 
 
 def estimate_head_pitch(body: BodyLandmarks) -> tuple[float | None, float]:

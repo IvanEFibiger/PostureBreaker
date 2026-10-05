@@ -9,6 +9,7 @@ from posture_guard.geometry import (
     distance_2d,
     distance_3d,
     midpoint,
+    normalize_line_angle,
     visibility_confidence,
     weighted_average,
 )
@@ -37,6 +38,16 @@ class AngleTests(unittest.TestCase):
 
     def test_angle_down_is_minus_ninety(self) -> None:
         self.assertAlmostEqual(angle_degrees(0.0, -1.0), -90.0)
+
+
+class NormalizeLineAngleTests(unittest.TestCase):
+    def test_folds_into_half_range(self) -> None:
+        self.assertAlmostEqual(normalize_line_angle(178.0), -2.0)
+        self.assertAlmostEqual(normalize_line_angle(-177.0), 3.0)
+        self.assertAlmostEqual(normalize_line_angle(90.0), 90.0)
+        self.assertAlmostEqual(normalize_line_angle(0.0), 0.0)
+        self.assertAlmostEqual(normalize_line_angle(45.0), 45.0)
+        self.assertAlmostEqual(normalize_line_angle(-45.0), -45.0)
 
 
 class MidpointTests(unittest.TestCase):

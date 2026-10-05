@@ -37,6 +37,14 @@ class ProfileDistanceTests(unittest.TestCase):
         self.assertIsNone(profile_distance(ViewState(head_yaw=None), MONITOR_1))
         self.assertIsNone(profile_distance(ViewState(head_yaw=0.1), ViewProfile(id="x", name="X")))
 
+    def test_torso_yaw_uses_circular_difference(self) -> None:
+        profile = ViewProfile(
+            id="p", name="P", head_yaw_mean=0.0, head_yaw_std=0.1, torso_yaw_mean=170.0, torso_yaw_std=1.0
+        )
+        state = ViewState(head_yaw=0.0, torso_yaw=-170.0)
+        # circular torso difference is 20, not 340; 20 / max(1.0, 3.0) * 0.3 = 2.0
+        self.assertAlmostEqual(profile_distance(state, profile), 2.0)
+
 
 class ViewSelectorTests(unittest.TestCase):
     def test_first_update_selects_closest_profile(self) -> None:
