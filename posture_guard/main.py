@@ -565,6 +565,9 @@ def _camera_worker(
                                     active_view.torso_yaw_mean = torso_mean
                                     active_view.head_yaw_std = head_std
                                     active_view.torso_yaw_std = torso_std
+                                    view_baselines, global_baselines = calibrator.last_baselines
+                                    active_view.metric_baselines = view_baselines
+                                    calibration_set.global_baselines.update(global_baselines)
                                 new_view_pending = False
                                 active_view_id = active_view.id
                                 selector.active_id = active_view_id

@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from .config import Config
 from .issues import PostureIssue
-from .models import MetricBaseline, MetricObservation
+from .models import ForwardState, MetricBaseline, MetricObservation, ShoulderState, ViewState
 
 EPSILON = 1e-6
 
@@ -83,6 +83,37 @@ METRIC_SPECS: dict[str, MetricSpec] = {
 
 def spec_for(metric_name: str) -> MetricSpec | None:
     return METRIC_SPECS.get(metric_name)
+
+
+def build_observations(
+    view: ViewState | None,
+    shoulders: ShoulderState | None,
+    forward: ForwardState | None,
+) -> dict[str, MetricObservation]:
+    """Flat V2 signal collection, kept separate from the legacy ``values``."""
+    observations: dict[str, MetricObservation] = {}
+    if view is not None:
+        for name in ("head_yaw", "head_pitch", "head_roll", "torso_yaw", "torso_lateral_lean", "neck_roll_delta"):
+            value = getattr(view, name)
+            if value is not None:
+                observations[name] = MetricObservation(value, view.confidence)
+    if shoulders is not None:
+        for name, value in (
+            ("shoulder_roll", shoulders.roll),
+            ("left_shoulder_elevation", shoulders.left_elevation),
+            ("right_shoulder_elevation", shoulders.right_elevation),
+            ("shoulder_elevation", shoulders.elevation),
+        ):
+            if value is not None:
+                observations[name] = MetricObservation(value, shoulders.confidence)
+    if forward is not None:
+        for name, value in (
+            ("head_forward_ratio", forward.head_forward_ratio),
+            ("torso_forward_angle", forward.torso_forward_angle),
+        ):
+            if value is not None:
+                observations[name] = MetricObservation(value, forward.confidence)
+    return observations
 
 
 def _baseline_from_observations(

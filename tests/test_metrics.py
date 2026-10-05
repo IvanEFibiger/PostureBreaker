@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from posture_guard.config import Config
-from posture_guard.detection import build_observations
 from posture_guard.issues import PostureIssue
 from posture_guard.metrics import (
     METRIC_SPECS,
@@ -11,6 +10,7 @@ from posture_guard.metrics import (
     DeviationMode,
     MetricSpec,
     build_metric_baselines,
+    build_observations,
     normalize_observation,
     resolve_baseline,
     spec_for,

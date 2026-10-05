@@ -215,6 +215,25 @@ class BuildProfileTests(unittest.TestCase):
         self.assertAlmostEqual(head_mean, 0.3)
         self.assertAlmostEqual(torso_mean, 0.05)
 
+    def test_calibrator_splits_view_and_global_baselines(self) -> None:
+        calibrator = Calibrator(3)
+        calibrator.start("good")
+        for value in (1.0, 2.0, 3.0):
+            calibrator.add(
+                DetectionMetrics(
+                    side="right",
+                    values={"a": 0.1, "b": 0.1},
+                    view=ViewState(head_yaw=0.2, head_roll=value, neck_roll_delta=value, confidence=0.9),
+                )
+            )
+        calibrator.build_profile(None, Config(calibration_frames=3))
+        view_baselines, global_baselines = calibrator.last_baselines
+        self.assertIn("head_roll", view_baselines)
+        self.assertIn("neck_roll_delta", global_baselines)
+        self.assertNotIn("head_yaw", view_baselines)
+        self.assertAlmostEqual(view_baselines["head_roll"].center, 2.0)
+        self.assertAlmostEqual(view_baselines["head_roll"].spread, 1.0)
+
 
 class OrientationSummaryTests(unittest.TestCase):
     def test_ignores_none_and_missing_views(self) -> None:

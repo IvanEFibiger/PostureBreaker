@@ -8,14 +8,8 @@ from .config import Config
 from .forward import aggregate_forward, estimate_forward_state
 from .geometry import visibility_confidence
 from .landmarks import extract_body_landmarks
-from .models import (
-    CalibrationProfile,
-    DetectionMetrics,
-    ForwardState,
-    MetricObservation,
-    ShoulderState,
-    ViewState,
-)
+from .metrics import build_observations
+from .models import CalibrationProfile, DetectionMetrics
 from .orientation import aggregate_view, estimate_view_state
 from .risk import metric_severity
 from .shoulders import aggregate_shoulders, estimate_shoulder_state
@@ -86,37 +80,6 @@ def choose_side(landmarks: list[Any], min_visibility: float) -> str | None:
     if not scored:
         return None
     return max(scored, key=lambda item: item[1])[0]
-
-
-def build_observations(
-    view: ViewState | None,
-    shoulders: ShoulderState | None,
-    forward: ForwardState | None,
-) -> dict[str, MetricObservation]:
-    """Flat V2 signal collection, kept separate from the legacy ``values``."""
-    observations: dict[str, MetricObservation] = {}
-    if view is not None:
-        for name in ("head_yaw", "head_pitch", "head_roll", "torso_yaw", "torso_lateral_lean", "neck_roll_delta"):
-            value = getattr(view, name)
-            if value is not None:
-                observations[name] = MetricObservation(value, view.confidence)
-    if shoulders is not None:
-        for name, value in (
-            ("shoulder_roll", shoulders.roll),
-            ("left_shoulder_elevation", shoulders.left_elevation),
-            ("right_shoulder_elevation", shoulders.right_elevation),
-            ("shoulder_elevation", shoulders.elevation),
-        ):
-            if value is not None:
-                observations[name] = MetricObservation(value, shoulders.confidence)
-    if forward is not None:
-        for name, value in (
-            ("head_forward_ratio", forward.head_forward_ratio),
-            ("torso_forward_angle", forward.torso_forward_angle),
-        ):
-            if value is not None:
-                observations[name] = MetricObservation(value, forward.confidence)
-    return observations
 
 
 def extract_metrics(result: Any, config: Config, preferred_side: str | None = None) -> DetectionMetrics | None:

@@ -5,7 +5,16 @@ import statistics
 from pathlib import Path
 
 from .config import Config
-from .models import CalibrationProfile, CalibrationSet, DetectionMetrics, MetricThreshold, ViewState
+from .metrics import CalibrationScope, build_metric_baselines, build_observations, spec_for
+from .models import (
+    CalibrationProfile,
+    CalibrationSet,
+    DetectionMetrics,
+    MetricBaseline,
+    MetricObservation,
+    MetricThreshold,
+    ViewState,
+)
 
 
 def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, MetricThreshold]:
@@ -95,19 +104,23 @@ class Calibrator:
         self.mode: str | None = None
         self.samples: list[tuple[str, dict[str, float]]] = []
         self.views: list[ViewState | None] = []
+        self.observation_frames: list[dict[str, MetricObservation]] = []
         self.last_orientation: tuple[float | None, float | None, float, float] = (None, None, 0.0, 0.0)
+        self.last_baselines: tuple[dict[str, MetricBaseline], dict[str, MetricBaseline]] = ({}, {})
         self.expected_side: str | None = None
 
     def start(self, mode: str, expected_side: str | None = None) -> None:
         self.mode = mode
         self.samples = []
         self.views = []
+        self.observation_frames = []
         self.expected_side = expected_side
 
     def cancel(self) -> None:
         self.mode = None
         self.samples = []
         self.views = []
+        self.observation_frames = []
         self.expected_side = None
 
     def is_running(self) -> bool:
@@ -120,7 +133,25 @@ class Calibrator:
             return False
         self.samples.append((metrics.side, metrics.values.copy()))
         self.views.append(metrics.view)
+        frame = metrics.observations or build_observations(metrics.view, metrics.shoulders, metrics.forward)
+        self.observation_frames.append(dict(frame))
         return len(self.samples) >= self.target_frames
+
+    def build_calibration_baselines(
+        self,
+        config: Config,
+    ) -> tuple[dict[str, MetricBaseline], dict[str, MetricBaseline]]:
+        view_baselines: dict[str, MetricBaseline] = {}
+        global_baselines: dict[str, MetricBaseline] = {}
+        for name, baseline in build_metric_baselines(self.observation_frames, config).items():
+            spec = spec_for(name)
+            if spec is None or spec.calibration_scope is CalibrationScope.NONE:
+                continue
+            if spec.calibration_scope is CalibrationScope.GLOBAL:
+                global_baselines[name] = baseline
+            else:
+                view_baselines[name] = baseline
+        return view_baselines, global_baselines
 
     def build_profile(
         self,
@@ -188,6 +219,7 @@ class Calibrator:
             )
         profile.quality_score = calibration_quality(profile, profile.thresholds)
         self.last_orientation = orientation_summary(self.views)
+        self.last_baselines = self.build_calibration_baselines(config)
         self.cancel()
         return profile
 
