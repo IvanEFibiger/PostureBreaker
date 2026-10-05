@@ -38,6 +38,8 @@ def _status_label(status: str) -> tuple[str, str]:
         "calibrating": ("Calibrando...", YELLOW),
         "missing_model": ("Falta modelo", RED),
         "camera_error": ("Error camara", RED),
+        "camera_reconnecting": ("Reconectando...", ORANGE),
+        "error": ("Error", RED),
     }
     return mapping.get(status, ("-", TEXT_SECONDARY))
 

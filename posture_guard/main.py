@@ -2,25 +2,31 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import cv2
 import mediapipe as mp
 
 from . import paths
 from .calibration import Calibrator, load_calibration, save_calibration
+from .camera import CameraError, open_camera
 from .config import Config, load_config
 from .detection import RollingMetrics, extract_metrics
 from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
 from .notifications import Notifications
+from .single_instance import SingleInstance
 from .state import SharedState
 from .storage import AnalyticsStore, open_store
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
 
 logger = logging.getLogger(__name__)
+
+SINGLE_INSTANCE_NAME = "PostureBreaker.single_instance"
 
 BREAK_ROUTINES = [
     {
@@ -99,7 +105,9 @@ def _tray_status_from_state(status: str) -> str:
         "no_calibration": "warning",
         "calibrating": "warning",
         "camera_error": "warning",
+        "camera_reconnecting": "warning",
         "missing_model": "warning",
+        "error": "bad",
     }
     return mapping.get(status, "off")
 
@@ -172,6 +180,36 @@ def _handle_events(
             )
 
 
+def _load_profile(calibration_path: Path, shared: SharedState):
+    try:
+        return load_calibration(calibration_path)
+    except Exception:
+        logger.exception("calibration_load_failed")
+        shared.update(
+            calibrated=False,
+            error_code="CALIBRATION_CORRUPTED",
+            error_message="No pude leer la calibración; se ignora hasta recalibrar.",
+        )
+        return None
+
+
+def _reconnect_camera(cap: Any, config: Config, shared: SharedState) -> Any:
+    logger.warning("camera_read_failed; reconnecting")
+    try:
+        if cap is not None:
+            cap.release()
+    except Exception:
+        pass
+    shared.update(status="camera_reconnecting")
+    try:
+        new_cap = open_camera(cv2.VideoCapture, config.camera_index)
+    except CameraError:
+        logger.error("camera_reconnect_failed")
+        return None
+    logger.info("camera_reconnected")
+    return new_cap
+
+
 def _camera_worker(
     shared: SharedState,
     config: Config,
@@ -179,294 +217,334 @@ def _camera_worker(
     resource_dir: Path,
     calibration_path: Path,
 ) -> None:
-    profile = load_calibration(calibration_path)
-    notifications = Notifications()
-    engine = PostureEngine(config, profile)
-    calibrator = Calibrator(config.calibration_frames)
-    smoother = RollingMetrics(config.smoothing_window)
+    store = None
+    cap = None
+    try:
+        profile = _load_profile(calibration_path, shared)
+        notifications = Notifications()
+        engine = PostureEngine(config, profile)
+        calibrator = Calibrator(config.calibration_frames)
+        smoother = RollingMetrics(config.smoothing_window)
 
-    db_path = _resolve_path(data_dir, config.database_path)
-    legacy_history_dir = _resolve_path(data_dir, config.history_dir)
-    store = open_store(db_path, legacy_history_dir=legacy_history_dir)
-    store.start_session(config.camera_index)
-
-    show_camera = False
-    shared.update(
-        calibrated=profile is not None,
-        status="no_calibration" if not profile else "ok",
-        streak_days=store.load_streak(),
-        hourly_trend=store.hourly_trend(),
-        weekly_trend=store.weekly_trend(),
-        top_errors=store.top_errors(),
-        focus_mode=False,
-        camera_visible=show_camera,
-    )
-
-    BaseOptions = mp.tasks.BaseOptions
-    PoseLandmarker = mp.tasks.vision.PoseLandmarker
-    PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-    RunningMode = mp.tasks.vision.RunningMode
-
-    model_path = _resolve_path(data_dir, config.model_path)
-    if not model_path.exists():
-        bundled_model = _resolve_path(resource_dir, config.model_path)
-        if bundled_model.exists():
-            model_path = bundled_model
-    if not model_path.exists():
-        shared.update(status="missing_model")
-        print(
-            f"No encontre el modelo en: {model_path}\n"
-            "Descarga pose_landmarker.task y dejalo junto a este script o el .exe."
-        )
-        store.close()
-        return
-
-    options = PoseLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(model_path)),
-        running_mode=RunningMode.VIDEO,
-        num_poses=1,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-        output_segmentation_masks=False,
-    )
-
-    cap = cv2.VideoCapture(config.camera_index)
-    if not cap.isOpened():
-        shared.update(status="camera_error")
-        print(f"No pude abrir la camara indice {config.camera_index}.")
-        store.close()
-        return
-
-    last_frame_ts = time.monotonic()
-    frame_interval = 1.0 / max(1.0, config.target_fps)
-    last_sample_at = 0.0
-    last_sample_signature: tuple[object, ...] | None = None
-    last_refresh_at = 0.0
-
-    with PoseLandmarker.create_from_options(options) as landmarker:
-        while not shared.consume_command("cmd_quit"):
-            frame_started_at = time.monotonic()
-            ok, frame = cap.read()
-            if not ok:
-                shared.update(status="camera_error")
-                break
-
-            frame = cv2.flip(frame, 1)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            timestamp_ms = int(time.monotonic() * 1000)
-            detection = landmarker.detect_for_video(mp_image, timestamp_ms)
-
-            preferred_side = profile.side if profile else None
-            raw_metrics = extract_metrics(detection, config, preferred_side=preferred_side)
-            if raw_metrics:
-                smoother.append(raw_metrics)
-            else:
-                smoother.clear()
-
-            metrics = smoother.mean()
-            has_pose = metrics is not None
-
-            now_ts = time.monotonic()
-            dt_seconds = max(0.0, now_ts - last_frame_ts)
-            last_frame_ts = now_ts
-
-            if shared.consume_command("cmd_calibrate_good"):
-                calibrator.start("good")
-                notifications.generic()
-            if shared.consume_command("cmd_calibrate_bad"):
-                if profile:
-                    calibrator.start("bad", expected_side=profile.side)
-                    notifications.generic()
-            if shared.consume_command("cmd_clear_calibration"):
-                profile = None
-                engine.clear_profile()
-                calibrator.cancel()
-                if calibration_path.exists():
-                    calibration_path.unlink()
-                notifications.generic()
-                shared.update(calibrated=False, status="no_calibration")
-            if shared.consume_command("cmd_toggle_camera"):
-                show_camera = not show_camera
-            if shared.consume_command("cmd_toggle_focus"):
-                engine.toggle_focus()
-                store.set_focus_mode(engine.focus_mode)
-
-            if calibrator.is_running():
-                shared.update(
-                    calibrating_mode=calibrator.mode or "",
-                    calibration_progress=len(calibrator.samples) / max(1, calibrator.target_frames),
-                    status="calibrating",
-                )
-                if metrics:
-                    done = calibrator.add(metrics)
-                    if done:
-                        try:
-                            profile = calibrator.build_profile(profile, config)
-                            engine.set_profile(profile)
-                            save_calibration(calibration_path, profile)
-                            notifications.calibration_ok()
-                            shared.update(
-                                calibrated=True,
-                                calibrating_mode="",
-                                calibration_progress=0.0,
-                            )
-                        except Exception as exc:
-                            calibrator.cancel()
-                            shared.update(calibrating_mode="", calibration_progress=0.0)
-                            print(f"Error de calibracion: {exc}")
-            else:
-                shared.update(calibrating_mode="", calibration_progress=0.0)
-
-            result = engine.update(metrics, has_pose, dt_seconds, now_ts)
-
-            if result.work_seconds_delta > 0.0:
-                store.add_work_time(result.work_seconds_delta, focus_mode=result.focus_mode)
-            if result.count_posture_time:
-                store.add_posture_time(result.posture_seconds_delta, result.posture_bad)
-
-            _handle_events(result, store, notifications, smoother, config)
-
-            break_title, break_instruction, break_rule = _break_payload(
-                result.break_due,
-                result.break_progress,
-                result.break_countdown_seconds,
-                result.completed_breaks,
+        db_path = _resolve_path(data_dir, config.database_path)
+        legacy_history_dir = _resolve_path(data_dir, config.history_dir)
+        try:
+            store = open_store(db_path, legacy_history_dir=legacy_history_dir)
+        except sqlite3.DatabaseError:
+            logger.exception("database_open_failed")
+            shared.update(
+                status="error",
+                error_code="DATABASE_ERROR",
+                error_message="No pude abrir la base de datos de analytics.",
             )
+            return
+        store.start_session(config.camera_index)
 
-            if not calibrator.is_running():
-                today = store.today_snapshot()
-                issue_title = result.issue_label
-                if result.posture_bad and result.issue_label:
-                    issue_title = f"{_severity_prefix(result.issue_severity)}: {result.issue_label}"
-                shared.update(
-                    status=_status_from_result(result),
-                    posture_score=store.score,
-                    is_bad_posture=result.posture_bad,
-                    has_pose=result.has_pose,
-                    work_seconds_today=today["total_work_seconds"],
-                    bad_streak_seconds=result.bad_streak_seconds,
-                    bad_posture_seconds_today=today["bad_posture_seconds"],
-                    posture_alerts=today["posture_alerts"],
-                    suppressed_posture_alerts=today["suppressed_posture_alerts"],
-                    break_alerts=today["break_alerts"],
-                    breaks_completed=today["breaks_completed"],
-                    break_due=result.break_due,
-                    summary_today=store.summary_today(),
-                    current_issue=(
-                        issue_title
-                        if result.posture_bad
-                        else ("Modo foco" if result.focus_mode else "")
-                    ),
-                    current_guidance=(
-                        result.issue_guidance
-                        if result.posture_bad
-                        else (
-                            "Alertas suaves activas. Se retrasa el aviso y aparece un tinte rojo suave si seguis encorvado."
-                            if result.focus_mode
-                            else ""
+        show_camera = False
+        shared.update(
+            calibrated=profile is not None,
+            status="no_calibration" if not profile else "ok",
+            streak_days=store.load_streak(),
+            hourly_trend=store.hourly_trend(),
+            weekly_trend=store.weekly_trend(),
+            top_errors=store.top_errors(),
+            focus_mode=False,
+            camera_visible=show_camera,
+        )
+
+        BaseOptions = mp.tasks.BaseOptions
+        PoseLandmarker = mp.tasks.vision.PoseLandmarker
+        PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
+        RunningMode = mp.tasks.vision.RunningMode
+
+        model_path = _resolve_path(data_dir, config.model_path)
+        if not model_path.exists():
+            bundled_model = _resolve_path(resource_dir, config.model_path)
+            if bundled_model.exists():
+                model_path = bundled_model
+        if not model_path.exists():
+            logger.error("model_missing path=%s", model_path)
+            shared.update(
+                status="error",
+                error_code="MODEL_MISSING",
+                error_message=f"No encontre el modelo en {model_path}. Descargalo con scripts/fetch_model.py.",
+            )
+            return
+
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(model_path)),
+            running_mode=RunningMode.VIDEO,
+            num_poses=1,
+            min_pose_detection_confidence=0.5,
+            min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+            output_segmentation_masks=False,
+        )
+
+        shared.update(status="camera_reconnecting")
+        cap = open_camera(
+            cv2.VideoCapture,
+            config.camera_index,
+            on_retry=lambda attempt, delay: logger.warning(
+                "camera_retry attempt=%s delay=%.1f", attempt, delay
+            ),
+        )
+        logger.info("camera_opened index=%s", config.camera_index)
+
+        last_frame_ts = time.monotonic()
+        frame_interval = 1.0 / max(1.0, config.target_fps)
+        last_sample_at = 0.0
+        last_sample_signature: tuple[object, ...] | None = None
+        last_refresh_at = 0.0
+
+        with PoseLandmarker.create_from_options(options) as landmarker:
+            while not shared.consume_command("cmd_quit"):
+                frame_started_at = time.monotonic()
+                ok, frame = cap.read()
+                if not ok:
+                    cap = _reconnect_camera(cap, config, shared)
+                    if cap is None:
+                        shared.update(
+                            status="error",
+                            error_code="CAMERA_UNAVAILABLE",
+                            error_message="Se perdió la camara y no pude reconectar.",
                         )
-                    ),
-                    focus_mode=result.focus_mode,
-                    focus_hint=(
-                        f"Modo foco activo. Pausa en {int(result.break_countdown_seconds // 60)}m. Alertas suaves hoy: {today['suppressed_posture_alerts']}"
-                        if result.focus_mode
-                        else f"Tiempo en foco hoy: {int(today['focus_seconds'] // 60)} min"
-                    ),
-                    focus_seconds_today=today["focus_seconds"],
-                    camera_visible=show_camera,
-                    break_progress=result.break_progress,
-                    break_countdown_seconds=result.break_countdown_seconds,
-                    break_title=break_title,
-                    break_instruction=break_instruction,
-                    break_rule_text=break_rule,
+                        return
+                    continue
+
+                frame = cv2.flip(frame, 1)
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                timestamp_ms = int(time.monotonic() * 1000)
+                detection = landmarker.detect_for_video(mp_image, timestamp_ms)
+
+                preferred_side = profile.side if profile else None
+                raw_metrics = extract_metrics(detection, config, preferred_side=preferred_side)
+                if raw_metrics:
+                    smoother.append(raw_metrics)
+                else:
+                    smoother.clear()
+
+                metrics = smoother.mean()
+                has_pose = metrics is not None
+
+                now_ts = time.monotonic()
+                dt_seconds = max(0.0, now_ts - last_frame_ts)
+                last_frame_ts = now_ts
+
+                if shared.consume_command("cmd_calibrate_good"):
+                    calibrator.start("good")
+                    notifications.generic()
+                if shared.consume_command("cmd_calibrate_bad"):
+                    if profile:
+                        calibrator.start("bad", expected_side=profile.side)
+                        notifications.generic()
+                if shared.consume_command("cmd_clear_calibration"):
+                    profile = None
+                    engine.clear_profile()
+                    calibrator.cancel()
+                    if calibration_path.exists():
+                        calibration_path.unlink()
+                    notifications.generic()
+                    shared.update(calibrated=False, status="no_calibration")
+                if shared.consume_command("cmd_toggle_camera"):
+                    show_camera = not show_camera
+                if shared.consume_command("cmd_toggle_focus"):
+                    engine.toggle_focus()
+                    store.set_focus_mode(engine.focus_mode)
+
+                if calibrator.is_running():
+                    shared.update(
+                        calibrating_mode=calibrator.mode or "",
+                        calibration_progress=len(calibrator.samples) / max(1, calibrator.target_frames),
+                        status="calibrating",
+                    )
+                    if metrics:
+                        done = calibrator.add(metrics)
+                        if done:
+                            try:
+                                profile = calibrator.build_profile(profile, config)
+                                engine.set_profile(profile)
+                                save_calibration(calibration_path, profile)
+                                logger.info("calibration_saved quality=%.1f", profile.quality_score)
+                                notifications.calibration_ok()
+                                shared.update(
+                                    calibrated=True,
+                                    calibrating_mode="",
+                                    calibration_progress=0.0,
+                                )
+                            except Exception as exc:
+                                calibrator.cancel()
+                                shared.update(calibrating_mode="", calibration_progress=0.0)
+                                logger.warning("calibration_failed: %s", exc)
+                else:
+                    shared.update(calibrating_mode="", calibration_progress=0.0)
+
+                result = engine.update(metrics, has_pose, dt_seconds, now_ts)
+
+                if result.work_seconds_delta > 0.0:
+                    store.add_work_time(result.work_seconds_delta, focus_mode=result.focus_mode)
+                if result.count_posture_time:
+                    store.add_posture_time(result.posture_seconds_delta, result.posture_bad)
+
+                _handle_events(result, store, notifications, smoother, config)
+
+                break_title, break_instruction, break_rule = _break_payload(
+                    result.break_due,
+                    result.break_progress,
+                    result.break_countdown_seconds,
+                    result.completed_breaks,
                 )
 
-            if result.break_due:
-                shared.update(
-                    overlay_message=f"PAUSA ACTIVA\n{break_instruction}",
-                    overlay_bg="#d97706",
-                    overlay_mode="banner",
-                    overlay_alpha=0.92,
-                )
-            elif result.posture_active and result.bad_streak_seconds >= result.posture_threshold_seconds:
-                title = (result.issue_label or "Enderezate").upper()
-                if result.focus_mode:
+                if not calibrator.is_running():
+                    today = store.today_snapshot()
+                    issue_title = result.issue_label
+                    if result.posture_bad and result.issue_label:
+                        issue_title = f"{_severity_prefix(result.issue_severity)}: {result.issue_label}"
                     shared.update(
-                        overlay_message=f"MODO FOCO  |  {title}",
-                        overlay_bg="#b91c1c",
-                        overlay_mode="focus_tint",
-                        overlay_alpha=0.16,
+                        status=_status_from_result(result),
+                        posture_score=store.score,
+                        is_bad_posture=result.posture_bad,
+                        has_pose=result.has_pose,
+                        work_seconds_today=today["total_work_seconds"],
+                        bad_streak_seconds=result.bad_streak_seconds,
+                        bad_posture_seconds_today=today["bad_posture_seconds"],
+                        posture_alerts=today["posture_alerts"],
+                        suppressed_posture_alerts=today["suppressed_posture_alerts"],
+                        break_alerts=today["break_alerts"],
+                        breaks_completed=today["breaks_completed"],
+                        break_due=result.break_due,
+                        summary_today=store.summary_today(),
+                        current_issue=(
+                            issue_title
+                            if result.posture_bad
+                            else ("Modo foco" if result.focus_mode else "")
+                        ),
+                        current_guidance=(
+                            result.issue_guidance
+                            if result.posture_bad
+                            else (
+                                "Alertas suaves activas. Se retrasa el aviso y aparece un tinte rojo suave si seguis encorvado."
+                                if result.focus_mode
+                                else ""
+                            )
+                        ),
+                        focus_mode=result.focus_mode,
+                        focus_hint=(
+                            f"Modo foco activo. Pausa en {int(result.break_countdown_seconds // 60)}m. Alertas suaves hoy: {today['suppressed_posture_alerts']}"
+                            if result.focus_mode
+                            else f"Tiempo en foco hoy: {int(today['focus_seconds'] // 60)} min"
+                        ),
+                        focus_seconds_today=today["focus_seconds"],
+                        camera_visible=show_camera,
+                        break_progress=result.break_progress,
+                        break_countdown_seconds=result.break_countdown_seconds,
+                        break_title=break_title,
+                        break_instruction=break_instruction,
+                        break_rule_text=break_rule,
                     )
-                else:
+
+                if result.break_due:
                     shared.update(
-                        overlay_message=f"{title}\n{result.issue_guidance}",
-                        overlay_bg="#b91c1c",
+                        overlay_message=f"PAUSA ACTIVA\n{break_instruction}",
+                        overlay_bg="#d97706",
                         overlay_mode="banner",
                         overlay_alpha=0.92,
                     )
-            else:
-                shared.update(overlay_message="")
+                elif result.posture_active and result.bad_streak_seconds >= result.posture_threshold_seconds:
+                    title = (result.issue_label or "Enderezate").upper()
+                    if result.focus_mode:
+                        shared.update(
+                            overlay_message=f"MODO FOCO  |  {title}",
+                            overlay_bg="#b91c1c",
+                            overlay_mode="focus_tint",
+                            overlay_alpha=0.16,
+                        )
+                    else:
+                        shared.update(
+                            overlay_message=f"{title}\n{result.issue_guidance}",
+                            overlay_bg="#b91c1c",
+                            overlay_mode="banner",
+                            overlay_alpha=0.92,
+                        )
+                else:
+                    shared.update(overlay_message="")
 
-            sample_signature = (
-                result.has_pose,
-                result.posture_bad,
-                result.issue_type,
-                result.break_due,
-                result.focus_mode,
-            )
-            if (
-                now_ts - last_sample_at >= max(5.0, config.analytics_sample_seconds)
-                or sample_signature != last_sample_signature
-            ):
-                store.record_sample(
-                    timestamp=dt.datetime.now(),
-                    has_pose=result.has_pose,
-                    is_bad=result.posture_bad,
-                    break_due=result.break_due,
-                    focus_mode=result.focus_mode,
-                    error_type=result.issue_type,
-                    error_severity=result.issue_severity,
+                sample_signature = (
+                    result.has_pose,
+                    result.posture_bad,
+                    result.issue_type,
+                    result.break_due,
+                    result.focus_mode,
                 )
-                last_sample_at = now_ts
-                last_sample_signature = sample_signature
+                if (
+                    now_ts - last_sample_at >= max(5.0, config.analytics_sample_seconds)
+                    or sample_signature != last_sample_signature
+                ):
+                    store.record_sample(
+                        timestamp=dt.datetime.now(),
+                        has_pose=result.has_pose,
+                        is_bad=result.posture_bad,
+                        break_due=result.break_due,
+                        focus_mode=result.focus_mode,
+                        error_type=result.issue_type,
+                        error_severity=result.issue_severity,
+                    )
+                    last_sample_at = now_ts
+                    last_sample_signature = sample_signature
 
-            if now_ts - last_refresh_at >= config.trend_refresh_seconds:
-                store.flush()
-                shared.update(
-                    streak_days=store.load_streak(),
-                    hourly_trend=store.hourly_trend(),
-                    weekly_trend=store.weekly_trend(),
-                    top_errors=store.top_errors(),
-                )
-                last_refresh_at = now_ts
+                if now_ts - last_refresh_at >= config.trend_refresh_seconds:
+                    store.flush()
+                    shared.update(
+                        streak_days=store.load_streak(),
+                        hourly_trend=store.hourly_trend(),
+                        weekly_trend=store.weekly_trend(),
+                        top_errors=store.top_errors(),
+                    )
+                    last_refresh_at = now_ts
 
-            if show_camera:
-                draw_guides(frame, metrics)
-                side_text = profile.side if profile else "sin calibrar"
-                info_lines = [
-                    f"Lado: {metrics.side if metrics else '-'} | Cal: {side_text}",
-                    f"Score: {store.score:.0f}%",
-                    f"Issue: {result.issue_label or '-'}",
-                    (
-                        "Modo foco ON"
-                        if result.focus_mode
-                        else f"Pausa en {int(result.break_countdown_seconds // 60)}m"
-                    ),
-                ]
-                draw_text_block(frame, info_lines, (18, 30), (255, 255, 255), scale=0.48)
-                shared.update(camera_frame=frame.copy())
-            else:
-                shared.update(camera_frame=None)
+                if show_camera:
+                    draw_guides(frame, metrics)
+                    side_text = profile.side if profile else "sin calibrar"
+                    info_lines = [
+                        f"Lado: {metrics.side if metrics else '-'} | Cal: {side_text}",
+                        f"Score: {store.score:.0f}%",
+                        f"Issue: {result.issue_label or '-'}",
+                        (
+                            "Modo foco ON"
+                            if result.focus_mode
+                            else f"Pausa en {int(result.break_countdown_seconds // 60)}m"
+                        ),
+                    ]
+                    draw_text_block(frame, info_lines, (18, 30), (255, 255, 255), scale=0.48)
+                    shared.update(camera_frame=frame.copy())
+                else:
+                    shared.update(camera_frame=None)
 
-            elapsed = time.monotonic() - frame_started_at
-            sleep_time = frame_interval - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+                elapsed = time.monotonic() - frame_started_at
+                sleep_time = frame_interval - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
-    store.close()
-    cap.release()
+    except CameraError as exc:
+        logger.error("camera_unavailable: %s", exc)
+        shared.update(
+            status="error",
+            error_code="CAMERA_UNAVAILABLE",
+            error_message=str(exc),
+        )
+    except Exception as exc:
+        logger.exception("worker_crashed")
+        shared.update(
+            status="error",
+            error_code="WORKER_CRASHED",
+            error_message=str(exc),
+        )
+    finally:
+        if store is not None:
+            store.close()
+        if cap is not None:
+            cap.release()
 
 
 def main() -> None:
@@ -474,99 +552,109 @@ def main() -> None:
     setup_logging(data_dir / "logs")
     logger.info("app_started data_dir=%s", data_dir)
 
-    config_path = data_dir / "posture_break_guard.config.json"
-    calibration_path = data_dir / "posture_calibration.json"
-
-    config = load_config(config_path)
-    shared = SharedState()
-
-    tray = TrayIcon()
-    tray.start()
-
-    worker = threading.Thread(
-        target=_camera_worker,
-        args=(shared, config, data_dir, resource_dir, calibration_path),
-        daemon=True,
-    )
-    worker.start()
-
-    camera_window = "Posture Guard - Camara"
-    overlay = VisualOverlay()
-
-    def _show_camera_frame() -> None:
-        with shared.lock:
-            frame = shared.camera_frame
-        if frame is not None:
-            cv2.imshow(camera_window, frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                shared.update(cmd_toggle_camera=True)
-        else:
-            try:
-                cv2.destroyWindow(camera_window)
-                cv2.waitKey(1)
-            except Exception:
-                pass
-
-    def _pump_overlay() -> None:
-        with shared.lock:
-            msg = shared.overlay_message
-            bg = shared.overlay_bg
-            mode = shared.overlay_mode
-            alpha = shared.overlay_alpha
-        if msg:
-            overlay.show(msg, bg=bg, mode=mode, alpha=alpha)
-        else:
-            overlay.hide()
-        overlay.pump()
-
-    def _tray_poll() -> None:
-        if not tray.enabled:
-            return
-        actions = tray.poll_actions()
-        if actions["quit"]:
-            shared.update(cmd_quit=True)
-        if actions["recalibrate_good"]:
-            shared.update(cmd_calibrate_good=True)
-        if actions["recalibrate_bad"]:
-            shared.update(cmd_calibrate_bad=True)
-        if actions["toggle_camera"]:
-            shared.update(cmd_toggle_camera=True)
-        if actions["toggle_focus"]:
-            shared.update(cmd_toggle_focus=True)
+    instance = SingleInstance(SINGLE_INSTANCE_NAME)
+    if not instance.acquire():
+        logger.warning("another_instance_running")
+        return
 
     try:
-        if config.headless:
-            raise ImportError
+        config_path = data_dir / "posture_break_guard.config.json"
+        calibration_path = data_dir / "posture_calibration.json"
 
-        from .dashboard import Dashboard
+        config = load_config(config_path)
+        shared = SharedState()
 
-        app = Dashboard(shared)
+        tray = TrayIcon()
+        tray.start()
 
-        def _ui_loop() -> None:
-            _tray_poll()
-            tray.set_status(_tray_status_from_state(shared.snapshot().get("status", "starting")))
-            _show_camera_frame()
-            _pump_overlay()
-            app.after(66, _ui_loop)
+        worker = threading.Thread(
+            target=_camera_worker,
+            args=(shared, config, data_dir, resource_dir, calibration_path),
+            daemon=True,
+        )
+        worker.start()
 
-        app.after(500, _ui_loop)
-        app.mainloop()
-    except ImportError:
-        print("customtkinter no instalado o modo headless activo.")
+        camera_window = "Posture Guard - Camara"
+        overlay = VisualOverlay()
+
+        def _show_camera_frame() -> None:
+            with shared.lock:
+                frame = shared.camera_frame
+            if frame is not None:
+                cv2.imshow(camera_window, frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    shared.update(cmd_toggle_camera=True)
+            else:
+                try:
+                    cv2.destroyWindow(camera_window)
+                    cv2.waitKey(1)
+                except Exception:
+                    pass
+
+        def _pump_overlay() -> None:
+            with shared.lock:
+                msg = shared.overlay_message
+                bg = shared.overlay_bg
+                mode = shared.overlay_mode
+                alpha = shared.overlay_alpha
+            if msg:
+                overlay.show(msg, bg=bg, mode=mode, alpha=alpha)
+            else:
+                overlay.hide()
+            overlay.pump()
+
+        def _tray_poll() -> None:
+            if not tray.enabled:
+                return
+            actions = tray.poll_actions()
+            if actions["quit"]:
+                shared.update(cmd_quit=True)
+            if actions["recalibrate_good"]:
+                shared.update(cmd_calibrate_good=True)
+            if actions["recalibrate_bad"]:
+                shared.update(cmd_calibrate_bad=True)
+            if actions["toggle_camera"]:
+                shared.update(cmd_toggle_camera=True)
+            if actions["toggle_focus"]:
+                shared.update(cmd_toggle_focus=True)
+
         try:
-            while worker.is_alive():
+            if config.headless:
+                raise ImportError
+
+            from .dashboard import Dashboard
+
+            app = Dashboard(shared)
+
+            def _ui_loop() -> None:
                 _tray_poll()
                 tray.set_status(_tray_status_from_state(shared.snapshot().get("status", "starting")))
                 _show_camera_frame()
                 _pump_overlay()
-                time.sleep(0.066)
-        except KeyboardInterrupt:
-            pass
+                app.after(66, _ui_loop)
 
-    shared.update(cmd_quit=True)
-    worker.join(timeout=5)
-    overlay.close()
-    tray.stop()
-    cv2.destroyAllWindows()
-    cv2.waitKey(1)
+            app.after(500, _ui_loop)
+            app.mainloop()
+        except ImportError:
+            logger.info("headless_mode")
+            print("customtkinter no instalado o modo headless activo.")
+            try:
+                while worker.is_alive():
+                    _tray_poll()
+                    tray.set_status(_tray_status_from_state(shared.snapshot().get("status", "starting")))
+                    _show_camera_frame()
+                    _pump_overlay()
+                    time.sleep(0.066)
+            except KeyboardInterrupt:
+                pass
+
+        shared.update(cmd_quit=True)
+        worker.join(timeout=5)
+        overlay.close()
+        tray.stop()
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)
+        logger.info("app_closed")
+    finally:
+        instance.release()

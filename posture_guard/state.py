@@ -20,6 +20,8 @@ class SharedState:
     posture_score: float = 100.0
     is_bad_posture: bool = False
     status: str = "starting"
+    error_code: str = ""
+    error_message: str = ""
     work_seconds_today: float = 0.0
     bad_streak_seconds: float = 0.0
     bad_posture_seconds_today: float = 0.0
