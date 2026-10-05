@@ -103,6 +103,18 @@ class BuildMetricBaselinesTests(unittest.TestCase):
     def test_empty_frames(self) -> None:
         self.assertEqual(build_metric_baselines([], Config()), {})
 
+    def test_risk_disabled_signals_are_still_calibrated(self) -> None:
+        frames = [
+            {
+                "head_forward_ratio": MetricObservation(0.2, 0.9),
+                "head_depth_ratio": MetricObservation(0.4, 0.9),
+            }
+            for _ in range(4)
+        ]
+        baselines = build_metric_baselines(frames, Config())
+        self.assertIn("head_forward_ratio", baselines)
+        self.assertIn("head_depth_ratio", baselines)
+
 
 class ResolveBaselineTests(unittest.TestCase):
     def test_view_scope_uses_view_baselines(self) -> None:
@@ -140,6 +152,16 @@ class MetricSpecTests(unittest.TestCase):
         self.assertEqual(spec.issue, PostureIssue.HEAD_FORWARD)
         self.assertEqual(spec.calibration_scope, CalibrationScope.VIEW)
         self.assertEqual(spec.deviation_mode, DeviationMode.HIGHER_IS_WORSE)
+
+    def test_head_forward_signals_are_observed_but_not_risked(self) -> None:
+        for name in ("head_forward_ratio", "head_depth_ratio"):
+            spec = spec_for(name)
+            self.assertEqual(spec.issue, PostureIssue.HEAD_FORWARD)
+            self.assertFalse(spec.risk_enabled)
+
+    def test_productive_metrics_keep_risk_enabled(self) -> None:
+        for name in ("head_roll", "head_pitch", "shoulder_roll", "left_shoulder_elevation"):
+            self.assertTrue(spec_for(name).risk_enabled)
 
     def test_every_spec_name_is_known(self) -> None:
         for name in METRIC_SPECS:

@@ -229,17 +229,40 @@ class SnoozeTests(unittest.TestCase):
     def test_v2_risk_uses_calibrated_baselines(self) -> None:
         engine = PostureEngine(make_config(), None)
         engine.set_baselines(
-            {"head_forward_ratio": MetricBaseline(0.0, 0.0, 1.0, 1.0, 10)},
+            {"left_shoulder_elevation": MetricBaseline(0.0, 0.0, 1.0, 1.0, 10)},
             {},
         )
         metrics = DetectionMetrics(
             side="right",
             values={},
-            observations={"head_forward_ratio": MetricObservation(0.2, 1.0)},
+            observations={"left_shoulder_elevation": MetricObservation(-0.5, 1.0)},
         )
         result = engine.update(metrics, True, 0.5, 1.0)
         self.assertGreater(result.risk_score, 0.0)
-        self.assertEqual(result.dominant_issue, "head_forward")
+        self.assertEqual(result.dominant_issue, "shoulder_elevation")
+
+    def test_head_forward_signals_are_observed_without_risk_or_streaks(self) -> None:
+        engine = PostureEngine(make_config(), None)
+        engine.set_baselines(
+            {
+                "head_forward_ratio": MetricBaseline(0.0, 0.0, 1.0, 1.0, 10),
+                "head_depth_ratio": MetricBaseline(0.0, 0.0, 1.0, 1.0, 10),
+            },
+            {},
+        )
+        metrics = DetectionMetrics(
+            side="right",
+            values={},
+            observations={
+                "head_forward_ratio": MetricObservation(0.5, 1.0),
+                "head_depth_ratio": MetricObservation(0.9, 1.0),
+            },
+        )
+        result = engine.update(metrics, True, 25.0, 1000.0)
+        self.assertEqual(result.risk_score, 0.0)
+        self.assertIsNone(result.dominant_issue)
+        self.assertEqual(result.dominant_issue_streak_seconds, 0.0)
+        self.assertEqual(engine.issue_streaks, {})
 
 
 if __name__ == "__main__":

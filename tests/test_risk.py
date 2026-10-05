@@ -105,19 +105,19 @@ def baseline(center: float = 0.0, spread: float = 0.0) -> MetricBaseline:
 
 class EvaluateV2IssuesTests(unittest.TestCase):
     def test_normalizes_deviation_against_baseline(self) -> None:
-        observations = {"head_forward_ratio": MetricObservation(0.20, 1.0)}
-        evaluation = evaluate_v2_issues(observations, {"head_forward_ratio": baseline()}, {}, Config())
-        # deviation 0.20, margin 0.08, scale 0.08 -> severity 1.5; weight 1.5 -> risk 2.25
-        self.assertAlmostEqual(evaluation.risk_score, 2.25)
-        self.assertEqual(evaluation.dominant_issue, PostureIssue.HEAD_FORWARD)
+        observations = {"head_pitch": MetricObservation(0.20, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"head_pitch": baseline()}, {}, Config())
+        # deviation 0.20, margin 0.08, scale 0.08 -> severity 1.5; weight 1.0 -> risk 1.5
+        self.assertAlmostEqual(evaluation.risk_score, 1.5)
+        self.assertEqual(evaluation.dominant_issue, PostureIssue.NECK_FLEXION)
 
     def test_within_baseline_is_not_an_issue(self) -> None:
-        observations = {"head_forward_ratio": MetricObservation(0.02, 1.0)}
-        evaluation = evaluate_v2_issues(observations, {"head_forward_ratio": baseline()}, {}, Config())
+        observations = {"head_pitch": MetricObservation(0.02, 1.0)}
+        evaluation = evaluate_v2_issues(observations, {"head_pitch": baseline()}, {}, Config())
         self.assertEqual(evaluation.risk_score, 0.0)
 
     def test_missing_baseline_is_skipped(self) -> None:
-        observations = {"head_forward_ratio": MetricObservation(0.20, 1.0)}
+        observations = {"head_pitch": MetricObservation(0.20, 1.0)}
         self.assertEqual(evaluate_v2_issues(observations, {}, {}, Config()).risk_score, 0.0)
 
     def test_view_context_metric_has_no_issue(self) -> None:
@@ -131,13 +131,13 @@ class EvaluateV2IssuesTests(unittest.TestCase):
         self.assertEqual(evaluation.risk_score, 0.0)
 
     def test_noise_floor_suppresses_tiny_deviations(self) -> None:
-        observations = {"head_forward_ratio": MetricObservation(0.10, 1.0)}
-        noisy = {"head_forward_ratio": baseline(spread=0.05)}
+        observations = {"head_pitch": MetricObservation(0.10, 1.0)}
+        noisy = {"head_pitch": baseline(spread=0.05)}
         self.assertEqual(evaluate_v2_issues(observations, noisy, {}, Config()).risk_score, 0.0)
 
     def test_config_min_confidence_governs_v2_runtime(self) -> None:
-        observations = {"head_forward_ratio": MetricObservation(0.5, 0.65)}
-        baselines = {"head_forward_ratio": baseline()}
+        observations = {"head_pitch": MetricObservation(0.5, 0.65)}
+        baselines = {"head_pitch": baseline()}
         self.assertEqual(evaluate_v2_issues(observations, baselines, {}, Config(metric_min_confidence=0.7)).risk_score, 0.0)
         self.assertGreater(evaluate_v2_issues(observations, baselines, {}, Config(metric_min_confidence=0.6)).risk_score, 0.0)
 
@@ -161,6 +161,27 @@ class EvaluateV2IssuesTests(unittest.TestCase):
         observations = {"shoulder_elevation": MetricObservation(-0.5, 1.0)}
         evaluation = evaluate_v2_issues(observations, {"shoulder_elevation": baseline()}, {}, Config())
         self.assertEqual(evaluation.risk_score, 0.0)
+
+    def test_risk_disabled_head_forward_signals_are_ignored(self) -> None:
+        observations = {
+            "head_forward_ratio": MetricObservation(0.5, 1.0),
+            "head_depth_ratio": MetricObservation(0.5, 1.0),
+        }
+        baselines = {name: baseline() for name in observations}
+        evaluation = evaluate_v2_issues(observations, baselines, {}, Config())
+        self.assertEqual(evaluation.risk_score, 0.0)
+        self.assertIsNone(evaluation.dominant_issue)
+
+    def test_risk_disabled_signals_do_not_mask_enabled_ones(self) -> None:
+        observations = {
+            "head_forward_ratio": MetricObservation(0.5, 1.0),
+            "head_depth_ratio": MetricObservation(0.5, 1.0),
+            "head_roll": MetricObservation(15.0, 1.0),
+        }
+        baselines = {name: baseline() for name in observations}
+        evaluation = evaluate_v2_issues(observations, baselines, {}, Config())
+        self.assertGreater(evaluation.risk_score, 0.0)
+        self.assertEqual(evaluation.dominant_issue, PostureIssue.HEAD_TILT)
 
 
 if __name__ == "__main__":

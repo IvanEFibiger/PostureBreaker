@@ -52,6 +52,9 @@ class MetricSpec:
     default_weight: float = 1.0
     # None -> fall back to the global Config.metric_min_confidence at runtime.
     min_confidence: float | None = None
+    # False -> still observed and calibrated, but excluded from the productive
+    # risk while the signal is under experimental validation.
+    risk_enabled: bool = True
 
 
 # Semantic knowledge lives here, not in the calibration: calibration only learns
@@ -75,10 +78,15 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     "right_shoulder_elevation": MetricSpec(
         PostureIssue.SHOULDER_ELEVATION, CalibrationScope.VIEW, DeviationMode.LOWER_IS_WORSE, 1.1
     ),
-    "head_forward_ratio": MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5),
+    # Both head-forward signals keep their issue mapping but stay out of the
+    # experimental risk until the dataset shows which one is specific enough.
+    "head_forward_ratio": MetricSpec(
+        PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5, risk_enabled=False
+    ),
     # Face-scale vs shoulder-width ratio: works frontal to a fixed desk camera.
-    # Observe-only until real data shows its specificity; maps to HEAD_FORWARD.
-    "head_depth_ratio": MetricSpec(PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5),
+    "head_depth_ratio": MetricSpec(
+        PostureIssue.HEAD_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.5, risk_enabled=False
+    ),
     "torso_forward_angle": MetricSpec(
         PostureIssue.TORSO_FORWARD, CalibrationScope.VIEW, DeviationMode.HIGHER_IS_WORSE, 1.2
     ),

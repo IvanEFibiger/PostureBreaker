@@ -77,12 +77,14 @@ def evaluate_v2_issues(
     """Issue risk from observations normalized against their calibrated baselines.
 
     Calibration only provides ``center``/``spread``; the semantic direction and
-    issue mapping come from ``MetricSpec``.
+    issue mapping come from ``MetricSpec``. Signals with ``risk_enabled=False``
+    are skipped here even when they have an issue: they stay observed and
+    calibrated, but do not move ``risk_score``/``dominant_issue``/streaks.
     """
     evaluation = IssueEvaluation()
     for name, observation in observations.items():
         spec = spec_for(name)
-        if spec is None or spec.issue is None:
+        if spec is None or spec.issue is None or not spec.risk_enabled:
             continue
         baseline = resolve_baseline(name, spec, view_baselines, global_baselines)
         margin = config.default_margins.get(name, 0.03)
