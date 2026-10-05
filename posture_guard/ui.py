@@ -154,6 +154,7 @@ class TrayIcon:
         self._quit_requested = False
         self._recalibrate_good = False
         self._recalibrate_bad = False
+        self._add_view_requested = False
         self._toggle_camera_requested = False
         self._toggle_focus_requested = False
         self._show_window_requested = False
@@ -184,6 +185,7 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Calibrar postura buena", self._on_recal_good),
             pystray.MenuItem("Calibrar postura mala", self._on_recal_bad),
+            pystray.MenuItem("Agregar posicion", self._on_add_view),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Salir", self._on_quit),
         )
@@ -202,6 +204,9 @@ class TrayIcon:
 
     def _on_recal_bad(self, icon: Any = None, item: Any = None) -> None:
         self._recalibrate_bad = True
+
+    def _on_add_view(self, icon: Any = None, item: Any = None) -> None:
+        self._add_view_requested = True
 
     def _on_quit(self, icon: Any = None, item: Any = None) -> None:
         self._quit_requested = True
@@ -233,17 +238,18 @@ class TrayIcon:
             "quit": self._quit_requested,
             "recalibrate_good": self._recalibrate_good,
             "recalibrate_bad": self._recalibrate_bad,
+            "add_view": self._add_view_requested,
             "toggle_camera": self._toggle_camera_requested,
             "toggle_focus": self._toggle_focus_requested,
             "show_window": self._show_window_requested,
         }
         self._recalibrate_good = False
         self._recalibrate_bad = False
+        self._add_view_requested = False
         self._toggle_camera_requested = False
         self._toggle_focus_requested = False
         self._show_window_requested = False
         return actions
-
     def stop(self) -> None:
         if self._icon:
             try:

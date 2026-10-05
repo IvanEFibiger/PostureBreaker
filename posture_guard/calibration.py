@@ -5,7 +5,7 @@ import statistics
 from pathlib import Path
 
 from .config import Config
-from .models import CalibrationProfile, DetectionMetrics, MetricThreshold
+from .models import CalibrationProfile, CalibrationSet, DetectionMetrics, MetricThreshold, ViewState
 
 
 def build_thresholds(profile: CalibrationProfile, config: Config) -> dict[str, MetricThreshold]:
@@ -74,21 +74,36 @@ def calibration_quality(
     return round(100.0 * sum(scores) / len(scores), 1)
 
 
+def orientation_summary(views: list[ViewState | None]) -> tuple[float | None, float | None, float, float]:
+    """Compute head/torso yaw mean and std for a set of calibrated view states."""
+    head_yaws = [view.head_yaw for view in views if view and view.head_yaw is not None]
+    torso_yaws = [view.torso_yaw for view in views if view and view.torso_yaw is not None]
+    head_mean = statistics.fmean(head_yaws) if head_yaws else None
+    torso_mean = statistics.fmean(torso_yaws) if torso_yaws else None
+    head_std = statistics.pstdev(head_yaws) if len(head_yaws) > 1 else 0.0
+    torso_std = statistics.pstdev(torso_yaws) if len(torso_yaws) > 1 else 0.0
+    return head_mean, torso_mean, head_std, torso_std
+
+
 class Calibrator:
     def __init__(self, target_frames: int) -> None:
         self.target_frames = target_frames
         self.mode: str | None = None
         self.samples: list[tuple[str, dict[str, float]]] = []
+        self.views: list[ViewState | None] = []
+        self.last_orientation: tuple[float | None, float | None, float, float] = (None, None, 0.0, 0.0)
         self.expected_side: str | None = None
 
     def start(self, mode: str, expected_side: str | None = None) -> None:
         self.mode = mode
         self.samples = []
+        self.views = []
         self.expected_side = expected_side
 
     def cancel(self) -> None:
         self.mode = None
         self.samples = []
+        self.views = []
         self.expected_side = None
 
     def is_running(self) -> bool:
@@ -100,6 +115,7 @@ class Calibrator:
         if self.expected_side and metrics.side != self.expected_side:
             return False
         self.samples.append((metrics.side, metrics.values.copy()))
+        self.views.append(metrics.view)
         return len(self.samples) >= self.target_frames
 
     def build_profile(
@@ -167,6 +183,7 @@ class Calibrator:
                 "Repetí la calibración con una postura mala más marcada."
             )
         profile.quality_score = calibration_quality(profile, profile.thresholds)
+        self.last_orientation = orientation_summary(self.views)
         self.cancel()
         return profile
 
@@ -180,3 +197,14 @@ def load_calibration(path: Path) -> CalibrationProfile | None:
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     return CalibrationProfile.from_json(data)
+
+
+def save_calibration_set(path: Path, calibration_set: CalibrationSet) -> None:
+    path.write_text(json.dumps(calibration_set.to_json(), indent=2), encoding="utf-8")
+
+
+def load_calibration_set(path: Path) -> CalibrationSet | None:
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return CalibrationSet.from_json(data)

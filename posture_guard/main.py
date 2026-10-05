@@ -14,7 +14,7 @@ import mediapipe as mp
 
 from . import paths
 from .autostart import Autostart
-from .calibration import Calibrator, load_calibration, save_calibration
+from .calibration import Calibrator, load_calibration_set, save_calibration_set
 from .camera import CameraError, list_cameras, open_camera
 from .config import Config, apply_settings, load_config, save_config
 from .debug import SNAPSHOT_LABELS, append_snapshot, build_snapshot, format_debug_lines
@@ -22,6 +22,7 @@ from .detection import RollingMetrics, extract_metrics
 from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
 from .logging_setup import setup_logging
+from .models import CalibrationSet, ViewProfile
 from .notifications import Notifications
 from .single_instance import SingleInstance
 from .state import SharedState
@@ -184,9 +185,9 @@ def _handle_events(
             )
 
 
-def _load_profile(calibration_path: Path, shared: SharedState):
+def _load_calibration_set(calibration_path: Path, shared: SharedState):
     try:
-        return load_calibration(calibration_path)
+        return load_calibration_set(calibration_path)
     except Exception:
         logger.exception("calibration_load_failed")
         shared.update(
@@ -195,6 +196,11 @@ def _load_profile(calibration_path: Path, shared: SharedState):
             error_message="No pude leer la calibración; se ignora hasta recalibrar.",
         )
         return None
+
+
+def _next_view(calibration_set: CalibrationSet) -> tuple[str, str]:
+    index = len(calibration_set.profiles) + 1
+    return f"view_{index}", f"Posicion {index}"
 
 
 def _autostart_command(entry_path: Path) -> str:
@@ -274,11 +280,14 @@ def _camera_worker(
     store = None
     cap = None
     try:
-        profile = _load_profile(calibration_path, shared)
+        calibration_set = _load_calibration_set(calibration_path, shared)
+        active_view = calibration_set.active_profile() if calibration_set else None
+        profile = active_view.calibration if active_view else None
         notifications = Notifications()
         engine = PostureEngine(config, profile)
         calibrator = Calibrator(config.calibration_frames)
         smoother = RollingMetrics(config.smoothing_window, config.smoothing_min_observations)
+        new_view_pending = False
 
         db_path = _resolve_path(data_dir, config.database_path)
         legacy_history_dir = _resolve_path(data_dir, config.history_dir)
@@ -403,11 +412,17 @@ def _camera_worker(
                 if shared.consume_command("cmd_calibrate_good"):
                     calibrator.start("good")
                     notifications.generic()
+                if shared.consume_command("cmd_calibrate_new_view"):
+                    calibrator.start("good")
+                    new_view_pending = True
+                    notifications.generic()
                 if shared.consume_command("cmd_calibrate_bad"):
                     if profile:
                         calibrator.start("bad", expected_side=profile.side)
                         notifications.generic()
                 if shared.consume_command("cmd_clear_calibration"):
+                    calibration_set = None
+                    active_view = None
                     profile = None
                     engine.clear_profile()
                     calibrator.cancel()
@@ -512,9 +527,27 @@ def _camera_worker(
                         done = calibrator.add(metrics)
                         if done:
                             try:
+                                mode = calibrator.mode
                                 profile = calibrator.build_profile(profile, config)
+                                head_mean, torso_mean, head_std, torso_std = calibrator.last_orientation
+                                if calibration_set is None:
+                                    calibration_set = CalibrationSet()
+                                if new_view_pending or calibration_set.active_profile() is None:
+                                    view_id, view_name = _next_view(calibration_set)
+                                    active_view = ViewProfile(id=view_id, name=view_name, calibration=profile)
+                                    calibration_set.profiles.append(active_view)
+                                    calibration_set.active_profile_id = view_id
+                                else:
+                                    active_view = calibration_set.active_profile()
+                                    active_view.calibration = profile
+                                if mode == "good":
+                                    active_view.head_yaw_mean = head_mean
+                                    active_view.torso_yaw_mean = torso_mean
+                                    active_view.head_yaw_std = head_std
+                                    active_view.torso_yaw_std = torso_std
+                                new_view_pending = False
+                                save_calibration_set(calibration_path, calibration_set)
                                 engine.set_profile(profile)
-                                save_calibration(calibration_path, profile)
                                 logger.info("calibration_saved quality=%.1f", profile.quality_score)
                                 notifications.calibration_ok()
                                 shared.update(
@@ -793,6 +826,8 @@ def main() -> None:
                 shared.update(cmd_calibrate_good=True)
             if actions["recalibrate_bad"]:
                 shared.update(cmd_calibrate_bad=True)
+            if actions["add_view"]:
+                shared.update(cmd_calibrate_new_view=True)
             if actions["toggle_camera"]:
                 shared.update(cmd_toggle_camera=True)
             if actions["toggle_focus"]:

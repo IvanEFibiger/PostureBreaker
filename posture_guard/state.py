@@ -58,6 +58,7 @@ class SharedState:
 
     cmd_calibrate_good: bool = False
     cmd_calibrate_bad: bool = False
+    cmd_calibrate_new_view: bool = False
     cmd_clear_calibration: bool = False
     cmd_toggle_camera: bool = False
     cmd_toggle_focus: bool = False

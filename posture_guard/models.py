@@ -56,6 +56,76 @@ class CalibrationProfile:
 
 
 @dataclass
+class ViewProfile:
+    id: str
+    name: str
+    head_yaw_mean: float | None = None
+    torso_yaw_mean: float | None = None
+    head_yaw_std: float = 0.0
+    torso_yaw_std: float = 0.0
+    calibration: CalibrationProfile | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "orientation": {
+                "head_yaw_mean": self.head_yaw_mean,
+                "torso_yaw_mean": self.torso_yaw_mean,
+                "head_yaw_std": self.head_yaw_std,
+                "torso_yaw_std": self.torso_yaw_std,
+            },
+            "posture": self.calibration.to_json() if self.calibration else None,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> ViewProfile:
+        orientation = data.get("orientation") or {}
+        posture = data.get("posture")
+        return cls(
+            id=str(data.get("id", "principal")),
+            name=str(data.get("name", "Principal")),
+            head_yaw_mean=orientation.get("head_yaw_mean"),
+            torso_yaw_mean=orientation.get("torso_yaw_mean"),
+            head_yaw_std=float(orientation.get("head_yaw_std", 0.0)),
+            torso_yaw_std=float(orientation.get("torso_yaw_std", 0.0)),
+            calibration=CalibrationProfile.from_json(posture) if posture else None,
+        )
+
+
+@dataclass
+class CalibrationSet:
+    schema_version: int = 2
+    profiles: list[ViewProfile] = field(default_factory=list)
+    active_profile_id: str | None = None
+
+    def active_profile(self) -> ViewProfile | None:
+        for profile in self.profiles:
+            if profile.id == self.active_profile_id:
+                return profile
+        return self.profiles[0] if self.profiles else None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "profiles": [profile.to_json() for profile in self.profiles],
+            "active_profile_id": self.active_profile_id,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> CalibrationSet:
+        # A file without ``schema_version`` is the V1 single-profile format.
+        if "schema_version" not in data:
+            view = ViewProfile(id="principal", name="Principal", calibration=CalibrationProfile.from_json(data))
+            return cls(schema_version=2, profiles=[view], active_profile_id="principal")
+        return cls(
+            schema_version=int(data.get("schema_version", 2)),
+            profiles=[ViewProfile.from_json(payload) for payload in data.get("profiles", [])],
+            active_profile_id=data.get("active_profile_id"),
+        )
+
+
+@dataclass
 class ViewState:
     head_yaw: float | None = None
     head_pitch: float | None = None

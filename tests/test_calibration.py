@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from posture_guard.calibration import Calibrator, build_thresholds, calibration_quality
+from posture_guard.calibration import (
+    Calibrator,
+    build_thresholds,
+    calibration_quality,
+    load_calibration_set,
+    orientation_summary,
+    save_calibration_set,
+)
 from posture_guard.config import Config
-from posture_guard.models import CalibrationProfile, DetectionMetrics
+from posture_guard.models import CalibrationProfile, CalibrationSet, DetectionMetrics, ViewProfile, ViewState
 
 
 class BuildThresholdsTests(unittest.TestCase):
@@ -184,6 +193,80 @@ class BuildProfileTests(unittest.TestCase):
         profile = calibrator.build_profile(None, Config(calibration_frames=4))
         self.assertIn("a", profile.good_mean)
         self.assertNotIn("b", profile.good_mean)
+
+    def test_calibrator_records_orientation_summary(self) -> None:
+        calibrator = Calibrator(2)
+        calibrator.start("good")
+        calibrator.add(
+            DetectionMetrics(side="right", values={"a": 0.1, "b": 0.1}, view=ViewState(head_yaw=0.2, torso_yaw=0.05))
+        )
+        calibrator.add(
+            DetectionMetrics(side="right", values={"a": 0.1, "b": 0.1}, view=ViewState(head_yaw=0.4, torso_yaw=0.05))
+        )
+        calibrator.build_profile(None, Config(calibration_frames=2))
+        head_mean, torso_mean, _, _ = calibrator.last_orientation
+        self.assertAlmostEqual(head_mean, 0.3)
+        self.assertAlmostEqual(torso_mean, 0.05)
+
+
+class OrientationSummaryTests(unittest.TestCase):
+    def test_ignores_none_and_missing_views(self) -> None:
+        head_mean, torso_mean, head_std, torso_std = orientation_summary(
+            [ViewState(head_yaw=0.2, torso_yaw=0.1), ViewState(head_yaw=0.4), None]
+        )
+        self.assertAlmostEqual(head_mean, 0.3)
+        self.assertAlmostEqual(torso_mean, 0.1)
+        self.assertGreater(head_std, 0.0)
+        self.assertEqual(torso_std, 0.0)
+
+    def test_all_missing_is_none(self) -> None:
+        self.assertEqual(orientation_summary([None, ViewState()]), (None, None, 0.0, 0.0))
+
+
+class CalibrationSetTests(unittest.TestCase):
+    def test_v1_profile_migrates_to_set(self) -> None:
+        v1 = CalibrationProfile(side="right", good_mean={"a": 0.1}, good_std={"a": 0.01}).to_json()
+        calibration_set = CalibrationSet.from_json(v1)
+        self.assertEqual(calibration_set.schema_version, 2)
+        self.assertEqual(len(calibration_set.profiles), 1)
+        self.assertEqual(calibration_set.active_profile().id, "principal")
+        self.assertEqual(calibration_set.active_profile().calibration.good_mean, {"a": 0.1})
+
+    def test_set_round_trip_preserves_orientation_and_posture(self) -> None:
+        view = ViewProfile(
+            id="monitor_1",
+            name="Monitor 1",
+            head_yaw_mean=0.38,
+            torso_yaw_mean=0.04,
+            head_yaw_std=0.03,
+            torso_yaw_std=0.02,
+            calibration=CalibrationProfile(side="right", good_mean={"a": 0.1}, good_std={"a": 0.01}),
+        )
+        calibration_set = CalibrationSet(profiles=[view], active_profile_id="monitor_1")
+        restored = CalibrationSet.from_json(calibration_set.to_json())
+        self.assertEqual(restored.active_profile().name, "Monitor 1")
+        self.assertAlmostEqual(restored.active_profile().head_yaw_mean, 0.38)
+        self.assertEqual(restored.active_profile().calibration.side, "right")
+
+    def test_missing_active_id_falls_back_to_first_profile(self) -> None:
+        profile = ViewProfile(id="a", name="A")
+        calibration_set = CalibrationSet(profiles=[profile], active_profile_id="missing")
+        self.assertIs(calibration_set.active_profile(), profile)
+
+    def test_save_and_load_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "calibration.json"
+            original = CalibrationSet(
+                profiles=[ViewProfile(id="monitor_1", name="Monitor 1")],
+                active_profile_id="monitor_1",
+            )
+            save_calibration_set(path, original)
+            loaded = load_calibration_set(path)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.active_profile().name, "Monitor 1")
+
+    def test_load_missing_file_is_none(self) -> None:
+        self.assertIsNone(load_calibration_set(Path("nope.json")))
 
 
 if __name__ == "__main__":
