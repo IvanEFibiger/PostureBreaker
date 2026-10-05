@@ -1,0 +1,28 @@
+{
+  "model_path": "pose_landmarker.task",
+  "database_path": "history/posture_guard.db",
+  "camera_index": 0,
+  "min_visibility": 0.55,
+  "sustained_bad_posture_seconds": 20.0,
+  "posture_alert_cooldown_seconds": 300.0,
+  "break_interval_minutes": 45.0,
+  "break_required_seconds": 90.0,
+  "break_repeat_alert_seconds": 30.0,
+  "away_reset_seconds": 75.0,
+  "calibration_frames": 90,
+  "target_fps": 15.0,
+  "analytics_sample_seconds": 10.0,
+  "trend_refresh_seconds": 15.0,
+  "focus_posture_multiplier": 2.0,
+  "focus_cooldown_multiplier": 2.0,
+  "focus_break_repeat_seconds": 180.0,
+  "headless": false,
+  "history_dir": "history",
+  "smoothing_window": 12,
+  "default_margins": {
+    "ear_shoulder_dx": 0.035,
+    "nose_shoulder_dx": 0.045,
+    "chin_drop": 0.03,
+    "torso_lean_dx": 0.04
+  }
+}
