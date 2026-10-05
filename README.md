@@ -61,6 +61,7 @@ Se abre el dashboard con score, estadísticas, controles de calibración, select
 - **Snooze**: silencia las alertas durante `snooze_minutes`.
 - **Diagnóstico**: genera `diagnostics.txt` con versión, Python, modelo, cámaras y rutas.
 - **Selector de cámara**, **exportar** y **borrar historial** desde el panel.
+- **Ajustes**: sliders de sensibilidad, intervalo y duración de pausas y segundos para alertar (se validan y persisten al aplicar).
 
 ## Calibración
 

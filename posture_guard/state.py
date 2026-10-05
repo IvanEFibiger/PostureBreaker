@@ -54,6 +54,7 @@ class SharedState:
     calibration_quality: float = 0.0
     calibration_summary: str = ""
     autostart_enabled: bool = False
+    settings: dict[str, float] = field(default_factory=dict)
 
     cmd_calibrate_good: bool = False
     cmd_calibrate_bad: bool = False
@@ -66,10 +67,12 @@ class SharedState:
     cmd_set_camera: bool = False
     cmd_toggle_autostart: bool = False
     cmd_diagnostics: bool = False
+    cmd_apply_settings: bool = False
     cmd_hide_window: bool = False
     cmd_show_window: bool = False
     cmd_quit: bool = False
     pending_camera_index: int = -1
+    pending_settings: dict[str, float] = field(default_factory=dict)
 
     def update(self, **kwargs: object) -> None:
         with self.lock:

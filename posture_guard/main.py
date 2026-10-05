@@ -16,7 +16,7 @@ from . import paths
 from .autostart import Autostart
 from .calibration import Calibrator, load_calibration, save_calibration
 from .camera import CameraError, list_cameras, open_camera
-from .config import Config, load_config, save_config
+from .config import Config, apply_settings, load_config, save_config
 from .detection import RollingMetrics, extract_metrics
 from .diagnostics import build_report, format_report
 from .engine import EngineResult, Event, PostureEngine
@@ -311,6 +311,12 @@ def _camera_worker(
             available_cameras=available_cameras,
             camera_index=config.camera_index,
             autostart_enabled=autostart.is_enabled(),
+            settings={
+                "min_visibility": config.min_visibility,
+                "break_interval_minutes": config.break_interval_minutes,
+                "break_required_seconds": config.break_required_seconds,
+                "sustained_bad_posture_seconds": config.sustained_bad_posture_seconds,
+            },
         )
 
         BaseOptions = mp.tasks.BaseOptions
@@ -475,6 +481,24 @@ def _camera_worker(
                         shared.update(calibration_summary=f"Diagnostico escrito en {dest.name}")
                     except Exception:
                         logger.exception("diagnostics_failed")
+                    notifications.generic()
+
+                if shared.consume_command("cmd_apply_settings"):
+                    changes = shared.consume_value("pending_settings", {}) or {}
+                    try:
+                        apply_settings(config, dict(changes), config_path)
+                        shared.update(
+                            settings={
+                                "min_visibility": config.min_visibility,
+                                "break_interval_minutes": config.break_interval_minutes,
+                                "break_required_seconds": config.break_required_seconds,
+                                "sustained_bad_posture_seconds": config.sustained_bad_posture_seconds,
+                            },
+                            calibration_summary="Ajustes guardados",
+                        )
+                    except (ValueError, TypeError):
+                        logger.exception("settings_apply_failed")
+                        shared.update(calibration_summary="Ajustes invalidos; no se aplicaron.")
                     notifications.generic()
 
                 if calibrator.is_running():

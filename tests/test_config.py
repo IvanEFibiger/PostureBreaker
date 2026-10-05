@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from posture_guard.config import Config, load_config, save_config
+from posture_guard.config import Config, apply_settings, load_config, save_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "posture_break_guard.config.json"
@@ -101,6 +101,25 @@ class SaveConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 save_config(Path(tmp) / "config.json", Config(min_visibility=2.0))
+
+
+class ApplySettingsTests(unittest.TestCase):
+    def test_apply_updates_config_and_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            save_config(path, Config())
+            config = load_config(path)
+            apply_settings(config, {"min_visibility": 0.7, "break_interval_minutes": 30}, path)
+            self.assertEqual(config.min_visibility, 0.7)
+            self.assertEqual(load_config(path).break_interval_minutes, 30)
+
+    def test_apply_invalid_leaves_config_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            config = Config()
+            with self.assertRaises(ValueError):
+                apply_settings(config, {"min_visibility": 2.0}, path)
+            self.assertEqual(config.min_visibility, 0.55)
 
 
 if __name__ == "__main__":

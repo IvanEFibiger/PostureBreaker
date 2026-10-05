@@ -157,6 +157,7 @@ class Dashboard(ctk.CTk):
         self.configure(fg_color=BG_COLOR)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._settings_loaded = False
         self._build_ui()
         self._poll()
 
@@ -303,6 +304,17 @@ class Dashboard(ctk.CTk):
         self._tools_hint = ctk.CTkLabel(tools, text="", font=("Segoe UI", 11), text_color=TEXT_SECONDARY, wraplength=420, justify="left")
         self._tools_hint.pack(anchor="w", padx=16, pady=(0, 14))
 
+        settings = ctk.CTkFrame(host, fg_color=CARD_COLOR, corner_radius=16)
+        settings.grid(row=14, column=0, sticky="ew", padx=24, pady=(0, 24))
+        ctk.CTkLabel(settings, text="Ajustes", font=("Segoe UI", 12, "bold"), text_color=TEXT_SECONDARY).pack(anchor="w", padx=16, pady=(14, 0))
+        self._slider_sens = self._add_slider(settings, "Sensibilidad (visibilidad minima)", 0.30, 0.95, 13)
+        self._slider_break = self._add_slider(settings, "Intervalo de pausas (min)", 10, 90, 80)
+        self._slider_break_len = self._add_slider(settings, "Duracion de pausa (s)", 30, 180, 150)
+        self._slider_sustain = self._add_slider(settings, "Segundos de mala postura para alertar", 5, 60, 55)
+        self._settings_hint = ctk.CTkLabel(settings, text="", font=("Segoe UI", 11), text_color=TEXT_SECONDARY, wraplength=420, justify="left")
+        self._settings_hint.pack(anchor="w", padx=16, pady=(8, 4))
+        ctk.CTkButton(settings, text="Aplicar ajustes", command=self._on_apply_settings, fg_color=ACCENT, hover_color="#EA580C", font=("Segoe UI", 12, "bold")).pack(fill="x", padx=16, pady=(0, 14))
+
     def _format_error_list(self, top_errors: list[dict[str, Any]]) -> str:
         if not top_errors:
             return "Aun no hay alertas suficientes para sacar patrones."
@@ -313,6 +325,14 @@ class Dashboard(ctk.CTk):
             count = int(item.get("count", 0))
             lines.append(f"{label}: {count}")
         return "\n".join(lines)
+
+    def _add_slider(self, parent: Any, label: str, minimum: float, maximum: float, steps: int) -> Any:
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill="x", padx=16, pady=(6, 0))
+        ctk.CTkLabel(frame, text=label, font=("Segoe UI", 11), text_color=TEXT_SECONDARY).pack(anchor="w")
+        slider = ctk.CTkSlider(frame, from_=minimum, to=maximum, number_of_steps=steps)
+        slider.pack(fill="x")
+        return slider
 
     def _poll(self) -> None:
         snap = self._shared.snapshot()
@@ -393,6 +413,23 @@ class Dashboard(ctk.CTk):
         )
         self._tools_hint.configure(text=str(snap.get("calibration_summary", "")))
 
+        settings = snap.get("settings") or {}
+        if not self._settings_loaded and settings:
+            self._slider_sens.set(float(settings.get("min_visibility", 0.55)))
+            self._slider_break.set(float(settings.get("break_interval_minutes", 45)))
+            self._slider_break_len.set(float(settings.get("break_required_seconds", 90)))
+            self._slider_sustain.set(float(settings.get("sustained_bad_posture_seconds", 20)))
+            self._settings_loaded = True
+        if settings:
+            self._settings_hint.configure(
+                text=(
+                    f"Actual: sensibilidad {float(settings.get('min_visibility', 0)):.2f} | "
+                    f"pausas cada {float(settings.get('break_interval_minutes', 0)):.0f} min | "
+                    f"pausa {float(settings.get('break_required_seconds', 0)):.0f}s | "
+                    f"alerta {float(settings.get('sustained_bad_posture_seconds', 0)):.0f}s"
+                )
+            )
+
         self.after(self.POLL_MS, self._poll)
 
     def _on_cal_good(self) -> None:
@@ -431,6 +468,17 @@ class Dashboard(ctk.CTk):
 
     def _on_diagnostics(self) -> None:
         self._shared.update(cmd_diagnostics=True)
+
+    def _on_apply_settings(self) -> None:
+        self._shared.update(
+            pending_settings={
+                "min_visibility": round(float(self._slider_sens.get()), 2),
+                "break_interval_minutes": round(float(self._slider_break.get()), 1),
+                "break_required_seconds": round(float(self._slider_break_len.get()), 1),
+                "sustained_bad_posture_seconds": round(float(self._slider_sustain.get()), 1),
+            },
+            cmd_apply_settings=True,
+        )
 
     def _on_close(self) -> None:
         self._shared.update(cmd_hide_window=True)

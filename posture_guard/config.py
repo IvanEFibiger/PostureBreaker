@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 
@@ -134,3 +134,16 @@ def load_config(path: Path) -> Config:
 def save_config(path: Path, config: Config) -> None:
     _validate(config)
     path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+
+
+def apply_settings(config: Config, changes: dict[str, object], path: Path) -> Config:
+    """Validate and persist settings, then apply them in place.
+
+    Raises ValueError (leaving ``config`` untouched and the file unchanged) when
+    the resulting configuration would be invalid.
+    """
+    candidate = replace(config, **changes)
+    save_config(path, candidate)
+    for key, value in changes.items():
+        setattr(config, key, value)
+    return config
