@@ -13,7 +13,10 @@ dist/
 
 # Runtime / personal data
 history/
+logs/
 *.db
+*.db.corrupt
+diagnostics.txt
 posture_calibration.json
 
 # Large model binaries (fetch separately)

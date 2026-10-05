@@ -32,6 +32,7 @@ Primera versión formal. Núcleo reestructurado a partir del roadmap técnico.
 - Pacing de FPS sobre el ciclo completo.
 - La cadera ya no invalida el frame completo: el torso se evalúa solo cuando la cadera es visible (antes podía dejar de detectar postura del todo si la cadera quedaba fuera de cuadro).
 - La media móvil y la calibración ahora toleran métricas parciales (cadera intermitente).
+- No se exige que todas las métricas habilitadas estén malas: con 2 habilitadas alcanza 1 (antes exigía las 2 y casi nunca detectaba).
 
 ### Removed
 

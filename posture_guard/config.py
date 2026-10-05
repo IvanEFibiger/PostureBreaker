@@ -133,7 +133,7 @@ def load_config(path: Path) -> Config:
 
 def save_config(path: Path, config: Config) -> None:
     _validate(config)
-    path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    path.write_text(json.dumps(asdict(config), indent=2) + "\n", encoding="utf-8")
 
 
 def apply_settings(config: Config, changes: dict[str, object], path: Path) -> Config:

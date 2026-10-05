@@ -186,6 +186,8 @@ def classify_posture(
         severity[metric_name] = normalized
 
     bad_metrics = sum(1 for value in bad_by_metric.values() if value)
-    effective_min = max(1, min(min_bad_metrics, enabled_metrics))
+    # Never require every enabled metric to be bad: leave room for one to be off.
+    cap = enabled_metrics - 1 if enabled_metrics > 1 else 1
+    effective_min = max(1, min(min_bad_metrics, cap))
     is_bad = enabled_metrics > 0 and bad_metrics >= effective_min
     return is_bad, bad_by_metric, severity

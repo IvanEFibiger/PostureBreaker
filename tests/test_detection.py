@@ -106,7 +106,7 @@ class ClassifyPostureTests(unittest.TestCase):
         profile = make_profile()
         profile.thresholds["ear_shoulder_dx"] = MetricThreshold(0.10, "disabled", None, 0.05)
         is_bad, bad_by_metric, _ = classify_posture(
-            profile, make_metrics(ear_shoulder_dx=0.0, chin_drop=0.30)
+            profile, make_metrics(ear_shoulder_dx=0.0, chin_drop=0.20)
         )
         self.assertNotIn("ear_shoulder_dx", bad_by_metric)
         self.assertFalse(is_bad)
@@ -132,6 +132,19 @@ class ClassifyPostureTests(unittest.TestCase):
         is_bad, _, _ = classify_posture(
             profile, make_metrics(ear_shoulder_dx=0.05), min_bad_metrics=2
         )
+        self.assertTrue(is_bad)
+
+    def test_two_enabled_metrics_need_only_one_bad(self) -> None:
+        profile = CalibrationProfile(
+            side="right",
+            good_mean={},
+            good_std={},
+            thresholds={
+                "a": MetricThreshold(0.10, "directional", 1, 0.05),
+                "b": MetricThreshold(0.10, "directional", 1, 0.05),
+            },
+        )
+        is_bad, _, _ = classify_posture(profile, make_metrics(a=0.20, b=0.05))
         self.assertTrue(is_bad)
 
     def test_severity_is_never_negative(self) -> None:
