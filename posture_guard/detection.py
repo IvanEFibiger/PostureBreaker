@@ -125,7 +125,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
     }
 
     body = extract_body_landmarks(result)
-    view = estimate_view_state(body) if body else None
+    view = estimate_view_state(body, config.min_visibility) if body else None
 
     return DetectionMetrics(side=side, values=values, confidence=confidence, points=points, view=view)
 

@@ -62,8 +62,8 @@ class ViewState:
     head_roll: float | None = None
 
     torso_yaw: float | None = None
-    torso_pitch: float | None = None
-    torso_roll: float | None = None
+    torso_lateral_lean: float | None = None
+    neck_roll_delta: float | None = None
 
     orientation: str = "unknown"
     confidence: float = 0.0

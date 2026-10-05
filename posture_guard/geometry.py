@@ -35,6 +35,11 @@ def angle_degrees(dx: float, dy: float) -> float:
     return math.degrees(math.atan2(dy, dx))
 
 
+def angle_from_vertical(dx: float, dy: float) -> float:
+    """Angle of the vector (dx, dy) from the +y (vertical) axis, in degrees."""
+    return math.degrees(math.atan2(dx, dy))
+
+
 def midpoint(a: Point2D, b: Point2D) -> Point2D:
     return Point2D(
         x=(a.x + b.x) / 2.0,
