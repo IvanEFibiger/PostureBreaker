@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from posture_guard.detection import classify_posture, dominant_issue, issue_details
+from posture_guard.config import Config
+from posture_guard.detection import (
+    classify_posture,
+    dominant_issue,
+    extract_metrics,
+    issue_details,
+)
 from posture_guard.models import CalibrationProfile, DetectionMetrics, MetricThreshold
 
 
@@ -130,6 +136,43 @@ class IssueDetailsTests(unittest.TestCase):
         label, guidance = issue_details("nope")
         self.assertEqual(label, "Postura inestable")
         self.assertTrue(guidance)
+
+
+class _Landmark:
+    def __init__(self, x: float = 0.5, y: float = 0.5, visibility: float = 0.9) -> None:
+        self.x = x
+        self.y = y
+        self.visibility = visibility
+
+
+class _Result:
+    def __init__(self, landmarks: list[_Landmark]) -> None:
+        self.pose_landmarks = [landmarks] if landmarks else []
+
+
+def make_landmarks(visibility: float = 0.9) -> list[_Landmark]:
+    return [_Landmark(visibility=visibility) for _ in range(33)]
+
+
+class ExtractMetricsTests(unittest.TestCase):
+    def test_returns_none_without_pose(self) -> None:
+        self.assertIsNone(extract_metrics(_Result([]), Config(), preferred_side="right"))
+
+    def test_returns_metrics_when_all_landmarks_visible(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="right")
+        self.assertIsNotNone(metrics)
+        self.assertEqual(metrics.side, "right")
+        self.assertIn("torso_lean_dx", metrics.values)
+
+    def test_returns_none_when_hip_is_not_visible(self) -> None:
+        landmarks = make_landmarks()
+        landmarks[24].visibility = 0.1
+        self.assertIsNone(extract_metrics(_Result(landmarks), Config(), preferred_side="right"))
+
+    def test_respects_preferred_side(self) -> None:
+        metrics = extract_metrics(_Result(make_landmarks()), Config(), preferred_side="left")
+        self.assertIsNotNone(metrics)
+        self.assertEqual(metrics.side, "left")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,12 @@ class BreakManager:
         self._away_streak = 0.0
         self._work_reset_done = False
 
+    def reset_continuity(self) -> None:
+        """Drop continuity streaks after a session gap without losing work time."""
+        self._back_streak = 0.0
+        self._away_streak = 0.0
+        self._work_reset_done = False
+
     def update(
         self,
         has_pose: bool,

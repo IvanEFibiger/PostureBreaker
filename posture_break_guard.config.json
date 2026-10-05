@@ -12,6 +12,7 @@
   "away_reset_seconds": 75.0,
   "calibration_frames": 90,
   "target_fps": 15.0,
+  "max_frame_gap_seconds": 30.0,
   "analytics_sample_seconds": 10.0,
   "trend_refresh_seconds": 15.0,
   "focus_posture_multiplier": 2.0,

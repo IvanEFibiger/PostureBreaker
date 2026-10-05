@@ -17,6 +17,7 @@ from .models import AlertState
 from .notifications import Notifications
 from .state import SharedState
 from .storage import AnalyticsStore
+from .timing import is_session_gap
 from .ui import TrayIcon, VisualOverlay, draw_guides, draw_text_block
 
 BREAK_ROUTINES = [
@@ -186,6 +187,7 @@ def _camera_worker(
 
     with PoseLandmarker.create_from_options(options) as landmarker:
         while not shared.consume_command("cmd_quit"):
+            frame_started_at = time.monotonic()
             ok, frame = cap.read()
             if not ok:
                 shared.update(status="camera_error")
@@ -210,6 +212,17 @@ def _camera_worker(
             now_ts = time.monotonic()
             dt_seconds = max(0.0, now_ts - last_frame_ts)
             last_frame_ts = now_ts
+            if is_session_gap(dt_seconds, config.max_frame_gap_seconds):
+                alert_state.bad_posture_streak = 0.0
+                alert_state.posture_active = False
+                smoother.clear()
+                break_manager.reset_continuity()
+                store.log_break_event(
+                    "session_gap",
+                    detail=f"Gap de {dt_seconds:.0f}s",
+                    focus_mode=focus_mode,
+                )
+                dt_seconds = 0.0
 
             if shared.consume_command("cmd_calibrate_good"):
                 calibrator.start("good")
@@ -462,7 +475,7 @@ def _camera_worker(
             else:
                 shared.update(camera_frame=None)
 
-            elapsed = time.monotonic() - now_ts
+            elapsed = time.monotonic() - frame_started_at
             sleep_time = frame_interval - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)

@@ -96,7 +96,7 @@ def extract_metrics(result: Any, config: Config, preferred_side: str | None = No
     hip = landmarks[hip_idx]
     nose = landmarks[NOSE]
 
-    required = [ear, shoulder, nose]
+    required = [ear, shoulder, hip, nose]
     if any(lm.visibility < config.min_visibility for lm in required):
         return None
 

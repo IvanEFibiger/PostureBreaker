@@ -20,6 +20,7 @@ class Config:
     away_reset_seconds: float = 75.0
     calibration_frames: int = 90
     target_fps: float = 15.0
+    max_frame_gap_seconds: float = 30.0
     analytics_sample_seconds: float = 10.0
     trend_refresh_seconds: float = 15.0
     focus_posture_multiplier: float = 2.0
@@ -45,6 +46,7 @@ _POSITIVE_FIELDS = (
     "break_repeat_alert_seconds",
     "away_reset_seconds",
     "target_fps",
+    "max_frame_gap_seconds",
     "analytics_sample_seconds",
     "trend_refresh_seconds",
     "focus_posture_multiplier",

@@ -125,6 +125,7 @@ Editá `posture_break_guard.config.json`:
 | `break_interval_minutes` | 45 | Minutos entre pausas |
 | `break_required_seconds` | 90 | Segundos para validar pausa |
 | `target_fps` | 15 | FPS objetivo (reduce CPU) |
+| `max_frame_gap_seconds` | 30 | Gap tratado como suspensión (no suma tiempo) |
 | `headless` | false | Arrancar sin ventana |
 | `history_dir` | "history" | Carpeta de historial |
 

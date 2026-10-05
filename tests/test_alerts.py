@@ -93,6 +93,14 @@ class BreakManagerTests(unittest.TestCase):
         events = manager.update(has_pose=False, dt=5.0, now_ts=100.0)
         self.assertEqual(events, [])
 
+    def test_reset_continuity_clears_streaks(self) -> None:
+        manager, _ = make_manager()
+        manager.update(has_pose=True, dt=60.0, now_ts=100.0)
+        manager.update(has_pose=True, dt=6.0, now_ts=110.0)
+        manager.reset_continuity()
+        self.assertEqual(manager._back_streak, 0.0)
+        self.assertEqual(manager._away_streak, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
