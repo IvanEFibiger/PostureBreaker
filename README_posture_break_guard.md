@@ -4,10 +4,13 @@ Monitor postural con webcam e IA. Detecta mala postura, recuerda pausas y muestr
 
 ## Dependencias
 
+Python **3.11 a 3.13**. En **3.14 no corre**: `mediapipe==0.10.33` falla por un cambio de GIL (`Fatal Python error: PyEval_RestoreThread`); `pyproject.toml` fija `requires-python = ">=3.11,<3.14"`.
+
 Versiones pinneadas en `requirements.txt`:
 
 ```bash
-pip install -r requirements.txt
+py -3.13 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
 **Opcionales** (mejoran la experiencia pero no son obligatorias):
@@ -39,7 +42,9 @@ posture_calibration.json            ← se genera al calibrar
 requirements.txt                    ← dependencias núcleo (pinneadas)
 requirements-optional.txt           ← bandeja + notificaciones (opcionales)
 scripts/
-  fetch_model.py    ← descarga + verifica el modelo
+  fetch_model.py              ← descarga + verifica el modelo
+  analyze_snapshots.py        ← analiza snapshots de debug manuales
+  compare_validation_runs.py  ← compara dos corridas de validación V2
 tests/              ← suite de tests (unittest)
 posture_guard/
   config.py         ← Config + validación + carga
@@ -48,6 +53,8 @@ posture_guard/
   timing.py         ← detección de gaps temporales
   calibration.py    ← calibración + thresholds
   detection.py      ← landmarks + métricas + clasificación
+  validation.py     ← runner guiado de validación V2 + reportes
+  guides.py         ← geometría del overlay (grupos, transform display)
   alerts.py         ← pausas
   notifications.py  ← notificaciones nativas + sonido
   storage.py        ← SQLite: analytics, migraciones y recuperación
@@ -70,8 +77,10 @@ python -m unittest discover -s tests -t . -v
 ## Cómo correrlo
 
 ```bash
-python posture_break_guard.py
+.venv\Scripts\python posture_break_guard.py
 ```
+
+(o `python posture_break_guard.py` con un intérprete 3.11–3.13)
 
 Se abre el **dashboard** con:
 - Puntuación de postura del día (%)

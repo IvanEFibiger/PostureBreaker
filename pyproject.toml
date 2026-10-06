@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "posturebreaker"
 description = "Monitor de postura local con webcam, pausas y analytics."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 authors = [{ name = "Ivan Fibiger" }]
 license = { text = "MIT" }
 dependencies = [

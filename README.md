@@ -19,19 +19,23 @@ Más detalle técnico y el roadmap en [`docs/`](docs/).
 
 ## Requisitos
 
-- Python **3.11+**
+- Python **3.11 a 3.13**. En **3.14 no arranca**: `mediapipe==0.10.33` revienta al invocar Python desde su thread pool sin el GIL (`Fatal Python error: PyEval_RestoreThread`). Por eso `pyproject.toml` fija `requires-python = ">=3.11,<3.14"`.
 - Una webcam
 
 ## Instalación
 
+Recomendado un entorno virtual en Python 3.13 (evita el `python` global si es 3.14):
+
 ```bash
-pip install -r requirements.txt
+py -3.13 -m venv .venv
+.venv\Scripts\python -m pip install -e ".[desktop]"
 ```
 
-Opcionales (bandeja del sistema y notificaciones nativas):
+O con los requirements (núcleo + opcionales):
 
 ```bash
-pip install -r requirements-optional.txt
+pip install -r requirements.txt
+pip install -r requirements-optional.txt   # bandeja + notificaciones
 ```
 
 - `customtkinter`: dashboard visual (sin él corre en modo headless)
@@ -48,9 +52,13 @@ Variantes (`--variant`): `heavy` (default, ~29 MB), `full` (~9 MB), `lite` (~5,8
 
 ## Ejecución
 
+Con el entorno virtual (recomendado):
+
 ```bash
-python posture_break_guard.py
+.venv\Scripts\python posture_break_guard.py
 ```
+
+O con `python posture_break_guard.py` si tu intérprete es 3.11–3.13.
 
 Se abre el dashboard con score, estadísticas, controles de calibración, selector de cámara, snooze y herramientas de datos.
 
@@ -69,6 +77,22 @@ Se abre el dashboard con score, estadísticas, controles de calibración, select
 2. **Calibrar buena**: sentate como trabajás normalmente.
 3. Opcional **Calibrar mala**: adoptá tu postura problemática.
 4. El perfil indica la calidad (%) y qué métricas detecta/ignora: las métricas que no distinguen bien/mala quedan `disabled` en vez de invalidar todo.
+
+> La calibración guarda un `geometry_version`. Si cambia el pipeline de landmarks (p. ej. el fix de espejado), las calibraciones viejas se consideran incompatibles y piden recalibrar; no se migran valores.
+
+## Validación V2 (observe-only)
+
+El clasificador **V1 sigue siendo el productivo**. En paralelo corre un conjunto de señales **V2 en modo observación** (`posture_v2_observe_only = true`): se calculan, se muestran en el overlay y se guardan, pero **no disparan alertas**.
+
+- **Runner guiado**: en el dashboard → *Validación detector V2* → *Ejecutar test V2*. Recorre ~12 escenarios desk (buena, cabeza adelantada/abajo/tilt, hombros, giros) con `RESET → PREPARE → CAPTURE` por escenario, y captura automáticamente.
+- **Aislamiento**: durante una corrida no se escribe SQLite, no se disparan alertas ni políticas temporales, y `smoother`/engine se resetean al terminar o cancelar.
+- **Datos**: cada corrida escribe `history/validation/<run_id>.jsonl` y un reporte `<run_id>-report.txt` (V2-only, con coverage `n/total`, `torso_yaw` legible y un chequeo de lateralidad L/R).
+- **Comparar corridas** (reproducibilidad A/B):
+  ```bash
+  python -m scripts.compare_validation_runs history/validation/<A>.jsonl history/validation/<B>.jsonl
+  ```
+
+El overlay de cámara dibuja los landmarks con etiquetas anatómicas `L`/`R`. MediaPipe procesa el frame **sin espejar** y la ventana se muestra espejada solo para el usuario.
 
 ## Configuración
 
